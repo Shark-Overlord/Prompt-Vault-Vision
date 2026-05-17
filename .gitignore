@@ -1,0 +1,26 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+node_modules/
+dist/
+.env
+.auth/
+backend/.auth/
+*.log
+
+# Local runtime databases and checkpoints
+data/*.db
+data/*.db-*
+
+# Downloaded visual assets are local library data, not source code.
+assets/images/*
+assets/thumbnails/*
+assets/source_pages/*
+!assets/images/.gitkeep
+!assets/thumbnails/.gitkeep
+!assets/source_pages/.gitkeep
+
+# Generated exports can be recreated from SQLite.
+exports/*
+!exports/.gitkeep

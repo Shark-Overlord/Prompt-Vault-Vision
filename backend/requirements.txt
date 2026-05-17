@@ -1,0 +1,8 @@
+fastapi==0.104.1
+uvicorn==0.24.0
+httpx==0.28.1
+Pillow==10.4.0
+python-dotenv==1.0.1
+pydantic==2.10.6
+langgraph==0.2.76
+langgraph-checkpoint-sqlite==2.0.1
