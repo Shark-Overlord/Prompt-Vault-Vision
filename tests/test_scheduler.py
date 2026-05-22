@@ -157,7 +157,7 @@ def test_default_category_tasks_are_seeded_and_broad_task_is_paused(temp_schedul
     assert {task["categories"][0] for task in default_tasks} == {
         "web_ui_prompt",
         "image_generation_prompt",
-        "image_editing_prompt",
+        "skill_repository",
         "video_generation_prompt",
     }
     assert all(task["status"] == "paused" for task in default_tasks)

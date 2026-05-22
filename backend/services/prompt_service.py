@@ -18,7 +18,11 @@ PROMPT_LABEL_RE = re.compile(
 FENCED_RE = re.compile(r"```(?P<lang>[a-zA-Z0-9_-]*)\s*\n(?P<body>.*?)```", re.IGNORECASE | re.DOTALL)
 HEADING_RE = re.compile(r"(?m)^(?P<marks>#{1,6})\s+(?P<title>.+?)\s*$")
 IMAGE_RE = re.compile(r"!\[(?P<alt>[^\]]*)\]\((?P<url>[^)\s]+)(?:\s+\"[^\"]*\")?\)", re.IGNORECASE)
+LINK_RE = re.compile(r"(?<!\!)\[(?P<label>[^\]]+)\]\((?P<url>[^)\s]+)(?:\s+\"[^\"]*\")?\)", re.IGNORECASE)
 HTML_IMAGE_RE = re.compile(r"<img\b(?P<attrs>[^>]*)>", re.IGNORECASE | re.DOTALL)
+HTML_VIDEO_RE = re.compile(r"<video\b(?P<attrs>[^>]*)>", re.IGNORECASE | re.DOTALL)
+HTML_SOURCE_RE = re.compile(r"<source\b(?P<attrs>[^>]*)>", re.IGNORECASE | re.DOTALL)
+URL_RE = re.compile(r"https?://[^\s<>()]+", re.IGNORECASE)
 HTML_ATTR_RE = re.compile(
     r"""(?P<name>[a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=\s*(?:"(?P<double>[^"]*)"|'(?P<single>[^']*)'|(?P<bare>[^\s>]+))""",
     re.IGNORECASE,
@@ -106,6 +110,33 @@ IMAGE_PAIR_HINTS = (
     "预览",
 )
 
+VIDEO_SECTION_HINTS = (
+    "video",
+    "generated video",
+    "result video",
+    "output video",
+    "video result",
+    "clip",
+    "demo video",
+    "sample video",
+    "user-attachments/assets",
+    "veo",
+    "kling",
+    "runway",
+    "seedance",
+    "wan",
+)
+
+VIDEO_LABEL_HINTS = (
+    "video",
+    "clip",
+    "demo",
+    "result",
+    "output",
+    "generated",
+    "preview",
+)
+
 WORKFLOW_SCREENSHOT_HINTS = (
     "workflow",
     "node graph",
@@ -124,6 +155,13 @@ PROMPT_QUALITY_HINTS = (
     "imagine",
     "photorealistic",
     "cinematic",
+    "scene",
+    "video",
+    "camera",
+    "shot",
+    "clip",
+    "motion",
+    "seconds",
     "landing",
     "dashboard",
     "poster",
@@ -182,6 +220,16 @@ class PromptCandidate:
 class ImageCandidate:
     url: str
     alt: str
+    start: int
+    end: int
+    heading: str
+    context: str
+
+
+@dataclass(frozen=True)
+class VideoCandidate:
+    url: str
+    label: str
     start: int
     end: int
     heading: str
@@ -284,6 +332,16 @@ def _image_pair_penalty(image: ImageCandidate) -> int:
     return 0
 
 
+def _looks_like_video_url(url: str, label: str = "", context: str = "") -> bool:
+    lower_url = (url or "").lower()
+    path = urlparse(lower_url).path
+    if PurePosixPath(path).suffix.lower() in {".mp4", ".mov", ".webm", ".m4v", ".avi"}:
+        return True
+    if "github.com/user-attachments/assets/" in lower_url and _contains_any(f"{label} {context}", VIDEO_SECTION_HINTS):
+        return True
+    return False
+
+
 def _slug_tokens(text: str) -> set[str]:
     clean = re.sub(r"[^a-zA-Z0-9\u4e00-\u9fff]+", " ", (text or "").lower())
     return {token for token in clean.split() if len(token) >= 2}
@@ -323,7 +381,35 @@ def _has_prompt_and_image_signal(text: str) -> bool:
     return any(hint in probe for hint in PROMPT_QUALITY_HINTS)
 
 
-def split_markdown_content_blocks(markdown: str) -> List[MarkdownContentBlock]:
+def _has_prompt_and_video_signal(text: str) -> bool:
+    if not text:
+        return False
+    probe = text[:4000].lower()
+    has_video = False
+    if "github.com/user-attachments/assets/" in probe:
+        has_video = _contains_any(probe, VIDEO_SECTION_HINTS)
+    if not has_video:
+        for match in LINK_RE.finditer(text):
+            label = _clean_text(match.group("label"))
+            url = match.group("url").strip()
+            if _looks_like_video_url(url, label, probe) or (_contains_any(label, VIDEO_LABEL_HINTS) and "http" in url):
+                has_video = True
+                break
+    if not has_video:
+        for match in URL_RE.finditer(text):
+            if _looks_like_video_url(match.group(0).strip(), "", probe):
+                has_video = True
+                break
+    if not has_video and (HTML_VIDEO_RE.search(text) or HTML_SOURCE_RE.search(text)):
+        has_video = True
+    if not has_video:
+        return False
+    if any(hint in probe for hint in ("prompt", "positive prompt", "video prompt", "提示词", "视频提示词")):
+        return True
+    return any(hint in probe for hint in PROMPT_QUALITY_HINTS)
+
+
+def split_markdown_content_blocks(markdown: str, media_mode: str = "image") -> List[MarkdownContentBlock]:
     text = markdown or ""
     blocks: List[MarkdownContentBlock] = []
     seen: set[tuple[str, int, int]] = set()
@@ -332,7 +418,8 @@ def split_markdown_content_blocks(markdown: str) -> List[MarkdownContentBlock]:
         start = max(0, start)
         end = min(len(text), max(start, end))
         block_text = text[start:end].strip()
-        if len(block_text) < 24 or not _has_prompt_and_image_signal(block_text):
+        has_signal = _has_prompt_and_video_signal(block_text) if media_mode == "video" else _has_prompt_and_image_signal(block_text)
+        if len(block_text) < 24 or not has_signal:
             return
         key = (kind, start, end)
         if key in seen:
@@ -513,6 +600,69 @@ def _extract_image_candidates(markdown: str, base_url: str) -> List[ImageCandida
 
     images.sort(key=lambda image: image.start)
     return images
+
+
+def _extract_video_candidates(markdown: str, base_url: str) -> List[VideoCandidate]:
+    videos: List[VideoCandidate] = []
+    seen_urls: set[str] = set()
+    text = markdown or ""
+
+    def add_candidate(raw_url: str, label: str, start: int, end: int) -> None:
+        if not raw_url or raw_url.startswith("#"):
+            return
+        url = urljoin(base_url, raw_url) if base_url else raw_url
+        context_start = max(0, start - 320)
+        context_end = min(len(text), end + 320)
+        context = _clean_text(text[context_start:context_end])
+        heading = _current_heading(text, start)
+        clean_label = _clean_text(label)
+        if not _looks_like_video_url(url, clean_label, f"{heading} {context}") and not _contains_any(f"{clean_label} {heading} {context}", VIDEO_SECTION_HINTS):
+            return
+        if url in seen_urls:
+            return
+        seen_urls.add(url)
+        videos.append(
+            VideoCandidate(
+                url=url,
+                label=clean_label,
+                start=start,
+                end=end,
+                heading=heading,
+                context=context,
+            )
+        )
+
+    for match in LINK_RE.finditer(text):
+        add_candidate(match.group("url").strip(), match.group("label"), match.start(), match.end())
+
+    for match in URL_RE.finditer(text):
+        add_candidate(match.group(0).strip(), "", match.start(), match.end())
+
+    for pattern in (HTML_VIDEO_RE, HTML_SOURCE_RE):
+        for match in pattern.finditer(text):
+            attrs = _parse_html_attrs(match.group("attrs"))
+            raw_url = (attrs.get("src") or attrs.get("data-src") or "").strip()
+            label = attrs.get("title") or attrs.get("aria-label") or "video"
+            add_candidate(raw_url, label, match.start(), match.end())
+
+    videos.sort(key=lambda item: item.start)
+    return videos
+
+
+def _video_anchor_match_score(video: VideoCandidate, prompt_text: str, heading: str) -> tuple[int, str]:
+    path = PurePosixPath(urlparse(video.url).path)
+    stem = re.sub(r"[-_]+", " ", path.stem)
+    tokens = _slug_tokens(f"{stem} {video.label}")
+    if not tokens:
+        return 0, ""
+    target_tokens = _slug_tokens(f"{heading} {prompt_text[:500]}")
+    overlap = tokens & target_tokens
+    if len(overlap) >= 2:
+        return 10, f"视频文件名或标签与 Prompt/标题存在命名重合：{', '.join(sorted(overlap)[:4])}"
+    if len(overlap) == 1 and heading:
+        token = next(iter(overlap))
+        return 6, f"视频文件名或标签与标题存在命名重合：{token}"
+    return 0, ""
 
 
 def _extract_gallery_prompt_effect_pairs(markdown: str, base_url: str, source_page_url: str, limit: int) -> List[PromptEffectCandidate]:
@@ -909,6 +1059,235 @@ def extract_prompt_effect_pairs(markdown: str, base_url: str, source_page_url: s
     return pairs
 
 
+def _extract_table_prompt_video_pairs(markdown: str, base_url: str, source_page_url: str, limit: int) -> List[PromptEffectCandidate]:
+    pairs: List[PromptEffectCandidate] = []
+    lines = (markdown or "").splitlines()
+    offset = 0
+    line_offsets: List[int] = []
+    for line in lines:
+        line_offsets.append(offset)
+        offset += len(line) + 1
+
+    index = 0
+    while index < len(lines) - 2 and len(pairs) < limit:
+        headers = _split_table_row(lines[index])
+        if not headers or not _is_table_separator(lines[index + 1]):
+            index += 1
+            continue
+
+        prompt_columns = _table_column_indices(headers, ("prompt", "提示词", "video prompt"))
+        video_columns = _table_column_indices(headers, ("video", "result", "output", "clip", "demo", "preview"))
+        if not prompt_columns or not video_columns:
+            index += 1
+            continue
+
+        row_index = index + 2
+        while row_index < len(lines):
+            cells = _split_table_row(lines[row_index])
+            if not cells or len(cells) < max(max(prompt_columns), max(video_columns)) + 1:
+                break
+
+            prompt = ""
+            for prompt_column in prompt_columns:
+                prompt = _clean_prompt_body(cells[prompt_column])
+                if _is_probable_prompt(prompt, max_length=6000):
+                    break
+            if not _is_probable_prompt(prompt, max_length=6000):
+                row_index += 1
+                continue
+
+            video_candidates: List[VideoCandidate] = []
+            for video_column in video_columns:
+                video_candidates.extend(_extract_video_candidates(cells[video_column], base_url))
+            if not video_candidates:
+                row_index += 1
+                continue
+
+            video = video_candidates[0]
+            title = _current_heading(markdown, line_offsets[index])
+            anchor_score, anchor_evidence = _video_anchor_match_score(video, prompt, title)
+            pairs.append(
+                PromptEffectCandidate(
+                    prompt=prompt,
+                    image_url=video.url,
+                    relation_type="direct_pair",
+                    evidence=f"Markdown 表格配对：{title or '未命名表格'}，Prompt 列与视频/结果列位于同一行；视频链接/文件名：{video.label or video.url}" + (f"；{anchor_evidence}" if anchor_evidence else ""),
+                    confidence=min(96, max(82, 90 + anchor_score)),
+                    source_page_url=source_page_url,
+                    source_heading=title,
+                    line_start=row_index + 1,
+                    line_end=row_index + 1,
+                    structural_score=60,
+                    distance_score=20,
+                    filename_score=6 + anchor_score,
+                    semantic_score=6,
+                    penalty_score=0,
+                )
+            )
+            row_index += 1
+
+        index = max(row_index, index + 1)
+
+    return pairs
+
+
+def _extract_block_prompt_video_pairs(markdown: str, base_url: str, source_page_url: str, limit: int) -> List[PromptEffectCandidate]:
+    pairs: List[PromptEffectCandidate] = []
+    seen: set[tuple[str, str]] = set()
+    blocks = split_markdown_content_blocks(markdown, media_mode="video")
+
+    for block in blocks:
+        if len(pairs) >= limit:
+            break
+        prompts = _extract_prompt_candidates_with_positions(block.text, limit=200)
+        videos = _extract_video_candidates(block.text, base_url)
+        if not prompts or not videos:
+            continue
+
+        local_pairs: List[tuple[PromptCandidate, VideoCandidate]] = []
+        if len(prompts) == len(videos) and len(prompts) > 1:
+            local_pairs = list(zip(prompts, videos))
+        else:
+            used_video_urls: set[str] = set()
+            for prompt in prompts:
+                ranked: List[tuple[int, VideoCandidate, int]] = []
+                for video in videos:
+                    if video.url in used_video_urls:
+                        continue
+                    distance = min(abs(video.start - prompt.end), abs(prompt.start - video.end))
+                    anchor_score, _ = _video_anchor_match_score(video, prompt.text, block.title or prompt.heading)
+                    ranked.append((distance - anchor_score * 180, video, anchor_score))
+                if not ranked:
+                    continue
+                _, video, _ = sorted(ranked, key=lambda item: item[0])[0]
+                used_video_urls.add(video.url)
+                local_pairs.append((prompt, video))
+
+        for prompt, video in local_pairs:
+            key = (prompt.text, video.url)
+            if key in seen:
+                continue
+            prompt_count = len(prompts)
+            video_count = len(videos)
+            distance = min(abs(video.start - prompt.end), abs(prompt.start - video.end))
+            distance_score = max(0, 20 - min(distance // 140, 20))
+            structural_score = _block_structural_score(block, prompt_count, video_count)
+            anchor_score, anchor_evidence = _video_anchor_match_score(video, prompt.text, block.title or prompt.heading)
+            semantic_score = 8 if _contains_any(prompt.text, PROMPT_QUALITY_HINTS) else 4
+            penalty_score = 8 if prompt_count > 1 and video_count > 1 and prompt_count != video_count else 0
+            score = max(0, min(98, structural_score + distance_score + anchor_score + semantic_score - penalty_score))
+            if score < 65:
+                continue
+            relation = "direct_pair" if score >= 85 else "likely_pair"
+            evidence = (
+                f"{_block_kind_label(block.kind)}：{block.title or prompt.heading or '未命名块'}；"
+                f"块内 Prompt 数 {prompt_count}，视频数 {video_count}；"
+                f"Prompt 与视频距离 {distance} 字符；视频链接/文件名：{video.label or video.url}"
+                + (f"；{anchor_evidence}" if anchor_evidence else "")
+            )
+            seen.add(key)
+            pairs.append(
+                PromptEffectCandidate(
+                    prompt=prompt.text,
+                    image_url=video.url,
+                    relation_type=relation,
+                    evidence=evidence,
+                    confidence=score,
+                    source_page_url=source_page_url,
+                    source_heading=block.title or prompt.heading,
+                    line_start=block.line_start + _line_number(block.text, prompt.start) - 1,
+                    line_end=block.line_start + _line_number(block.text, prompt.end) - 1,
+                    structural_score=structural_score,
+                    distance_score=distance_score,
+                    filename_score=anchor_score,
+                    semantic_score=semantic_score,
+                    penalty_score=penalty_score,
+                )
+            )
+            if len(pairs) >= limit:
+                break
+
+    return pairs
+
+
+def extract_prompt_video_pairs(markdown: str, base_url: str, source_page_url: str, limit: int = 10) -> List[PromptEffectCandidate]:
+    table_pairs = _extract_table_prompt_video_pairs(markdown, base_url, source_page_url, limit)
+    if len(table_pairs) >= limit:
+        return table_pairs[:limit]
+
+    pairs: List[PromptEffectCandidate] = list(table_pairs)
+    used_pair_keys: set[tuple[str, str]] = {(pair.prompt, pair.image_url) for pair in table_pairs}
+
+    block_pairs = _extract_block_prompt_video_pairs(markdown, base_url, source_page_url, limit - len(pairs))
+    for block_pair in block_pairs:
+        key = (block_pair.prompt, block_pair.image_url)
+        if key in used_pair_keys:
+            continue
+        used_pair_keys.add(key)
+        pairs.append(block_pair)
+        if len(pairs) >= limit:
+            return pairs[:limit]
+
+    prompts = _extract_prompt_candidates_with_positions(markdown, limit=max(40, min(limit * 3, 10_000)))
+    videos = _extract_video_candidates(markdown, base_url)
+    used_videos: set[str] = {pair.image_url for pair in pairs}
+
+    for prompt in prompts:
+        section_start, section_end = _section_bounds(markdown, prompt.start)
+        section_text = markdown[section_start:section_end]
+        if not _contains_any(f"{prompt.heading} {section_text[:1200]}", VIDEO_SECTION_HINTS):
+            continue
+        best: tuple[int, VideoCandidate, str, int, int, int] | None = None
+        for video in videos:
+            if video.url in used_videos:
+                continue
+            if not (section_start <= video.start <= section_end):
+                continue
+            distance = min(abs(video.start - prompt.end), abs(prompt.start - video.end))
+            if distance > 2600:
+                continue
+            anchor_score, anchor_evidence = _video_anchor_match_score(video, prompt.text, prompt.heading)
+            distance_score = max(0, 20 - min(distance // 120, 20))
+            structural_score = 46
+            semantic_score = 8 if _contains_any(prompt.text, PROMPT_QUALITY_HINTS) else 4
+            score = max(0, min(96, structural_score + distance_score + anchor_score + semantic_score))
+            if score < 70:
+                continue
+            evidence = f"同一视频小节：{prompt.heading or '未命名小节'}；Prompt 与视频距离 {distance} 字符；视频链接/文件名：{video.label or video.url}"
+            if anchor_evidence:
+                evidence = f"{evidence}；{anchor_evidence}"
+            candidate = (score, video, evidence, structural_score, distance_score, semantic_score)
+            if best is None or candidate[0] > best[0]:
+                best = candidate
+
+        if not best:
+            continue
+        score, video, evidence, structural_score, distance_score, semantic_score = best
+        used_videos.add(video.url)
+        pairs.append(
+            PromptEffectCandidate(
+                prompt=prompt.text,
+                image_url=video.url,
+                relation_type="direct_pair" if score >= 85 else "likely_pair",
+                evidence=evidence,
+                confidence=score,
+                source_page_url=source_page_url,
+                source_heading=prompt.heading,
+                line_start=_line_number(markdown, prompt.start),
+                line_end=_line_number(markdown, prompt.end),
+                structural_score=structural_score,
+                distance_score=distance_score,
+                filename_score=0,
+                semantic_score=semantic_score,
+                penalty_score=0,
+            )
+        )
+        if len(pairs) >= limit:
+            break
+
+    return pairs
+
+
 def build_cn_explanation(prompt: str, category: str) -> str:
     category_cn = {
         "web_ui_prompt": "Web UI 视觉生成",
@@ -958,11 +1337,12 @@ def infer_scenario(category: str, text: str) -> str:
     return "other"
 
 
-def default_effect_review(has_image: bool, relation: str = "unclear") -> str:
+def default_effect_review(has_image: bool, relation: str = "unclear", category: str = "") -> str:
+    media_cn = "????" if category == "video_generation_prompt" else "???"
     if not has_image:
-        return "暂未保存明确效果图，需要后续复查 Prompt 与输出效果的对应关系。"
+        return f"??????{media_cn}??????? Prompt ???????????"
     if relation == "direct_pair":
-        return "效果图与 Prompt 位于同一案例上下文，存在较明确对应关系；仍需人工复核主体一致性、构图稳定性和商用风险。"
+        return f"{media_cn}? Prompt ??????????????????????????????????/???????????"
     if relation == "likely_pair":
-        return "效果图与 Prompt 位于同一小节或邻近上下文，存在较高概率对应关系；建议人工确认后再标记为精选或普通。"
-    return "图片与 Prompt 缺少明确对应证据，不建议作为 Prompt 效果对复用。"
+        return f"{media_cn}? Prompt ?????????????????????????????????????????"
+    return f"{media_cn}? Prompt ???????????????? Prompt ??????"

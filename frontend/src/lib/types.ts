@@ -68,6 +68,14 @@ export type RepoScanResult = {
   secondary_target_count?: number;
   estimated_pair_count?: number;
   template_fallback?: boolean;
+  web_ui_prompts_found?: number;
+  web_ui_prompts_added?: number;
+  web_ui_prompts_updated?: number;
+  web_ui_prompts_skipped?: number;
+  web_ui_screenshots_added?: number;
+  skill_type?: string;
+  skill_profiles_added?: number;
+  skill_profiles_updated?: number;
   summary?: string | null;
 };
 
@@ -98,6 +106,11 @@ export type RepoScanRun = {
   error?: string | null;
   options_json?: string | null;
   result_json?: string | null;
+  web_ui_prompts_found?: number;
+  web_ui_prompts_added?: number;
+  web_ui_prompts_updated?: number;
+  web_ui_prompts_skipped?: number;
+  web_ui_screenshots_added?: number;
   started_at?: string | null;
   finished_at?: string | null;
   created_at: string;
@@ -192,9 +205,22 @@ export type PromptPair = {
   pair_evidence?: string;
   pair_confidence?: number;
   generated_by?: string;
+  visual_asset_type?: string;
+  visual_asset_type_confidence?: number;
+  visual_asset_type_source?: string;
+  visual_asset_type_reason?: string;
+  latest_annotation_suggestion_id?: number | null;
+  latest_annotation_suggestion_status?: string | null;
+  latest_suggested_cn_explanation?: string | null;
+  latest_suggested_tags_json?: string | null;
+  latest_suggested_tags?: Tag[];
+  latest_suggested_image_type_cn?: string | null;
+  latest_suggested_reason_cn?: string | null;
+  annotation_display_status?: "formal" | "draft" | "none" | string;
   created_at: string;
   updated_at: string;
   tags?: Tag[];
+  tag_count?: number;
 };
 
 export type VisualAsset = {
@@ -220,6 +246,122 @@ export type VisualAsset = {
 
 export type PromptPairPatch = Omit<Partial<PromptPair>, "tags"> & {
   tags?: string[];
+};
+
+export type PromptPairBatchUpdate = {
+  ids: number[];
+  selection_status?: string;
+  quality_level?: string;
+  visual_asset_type?: string;
+  tags?: string[];
+};
+
+export type PromptPairBatchUpdateResult = {
+  updated: boolean;
+  requested_count: number;
+  updated_count: number;
+  ids: number[];
+  missing_ids: number[];
+};
+
+export type WebUiPrompt = {
+  id: number;
+  repo_id?: number | null;
+  repo_name?: string | null;
+  repo_url?: string | null;
+  source_page_url?: string | null;
+  source_file?: string | null;
+  source_heading?: string | null;
+  line_start?: number | null;
+  line_end?: number | null;
+  asset_group: string;
+  asset_type: string;
+  library_kind?: string | null;
+  component_type?: string | null;
+  page_type?: string | null;
+  framework?: string | null;
+  prompt_text: string;
+  prompt_cn_translation?: string | null;
+  design_rules?: string | null;
+  ui_pattern?: string | null;
+  screenshot_original_url?: string | null;
+  screenshot_local_path?: string | null;
+  screenshot_hash?: string | null;
+  tags?: string[];
+  quality_level?: string | null;
+  selection_status?: string | null;
+  reuse_value?: string | null;
+  evidence?: string | null;
+  confidence?: number | null;
+  content_hash?: string | null;
+  license?: string | null;
+  commercial_risk?: string | null;
+  generated_by?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  notes?: string | null;
+};
+
+export type WebUiRepoProfile = {
+  id: number;
+  repo_id: number;
+  repo_name?: string | null;
+  repo_url?: string | null;
+  profile_type: string;
+  library_kind?: string | null;
+  ui_stack?: string | null;
+  supported_frontend_types?: string[];
+  component_focus?: string[];
+  style_keywords?: string[];
+  reuse_mode?: string | null;
+  summary_cn?: string | null;
+  ai_summary_cn?: string | null;
+  evidence?: string | null;
+  ai_reason_cn?: string | null;
+  confidence?: number | null;
+  source_ai_config_id?: number | null;
+  screenshot_original_url?: string | null;
+  screenshot_local_path?: string | null;
+  screenshot_hash?: string | null;
+  quality_level?: string | null;
+  selection_status?: string | null;
+  commercial_risk?: string | null;
+  last_scanned_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  notes?: string | null;
+};
+
+export type SkillRepoProfile = {
+  id: number;
+  repo_id: number;
+  repo_name?: string | null;
+  repo_url?: string | null;
+  skill_type?: string | null;
+  target_platform?: string | null;
+  runtime_stack?: string | null;
+  capabilities?: string[];
+  input_types?: string[];
+  output_types?: string[];
+  use_cases?: string[];
+  tools?: string[];
+  install_method?: string | null;
+  configuration_notes?: string | null;
+  reuse_mode?: string | null;
+  summary_cn?: string | null;
+  ai_summary_cn?: string | null;
+  evidence?: string | null;
+  ai_reason_cn?: string | null;
+  tags?: string[];
+  confidence?: number | null;
+  source_ai_config_id?: number | null;
+  quality_level?: string | null;
+  selection_status?: string | null;
+  commercial_risk?: string | null;
+  last_scanned_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  notes?: string | null;
 };
 
 export type PairCandidate = {
@@ -415,9 +557,15 @@ export type TaskRun = {
 };
 
 export type AgentSource = {
-  type: "repo" | "prompt_pair" | "pair_candidate";
+  type: "repo" | "prompt_pair" | "pair_candidate" | "web_ui_prompt" | "skill_repo";
   id: number;
   title: string;
+  tool?: string;
+  route?: string;
+  external_url?: string | null;
+  preview_image?: string | null;
+  snippet?: string | null;
+  matched_reason?: string | null;
   data: Record<string, unknown>;
 };
 
@@ -452,6 +600,7 @@ export type AgentChatResult = {
   message: AgentMessage;
   sources: AgentSource[];
   actions: AgentAction[];
+  tool_plan?: Record<string, unknown>;
 };
 
 export type AgentMemory = {

@@ -12,7 +12,131 @@ class PromptPairPatch(BaseModel):
     reusable_value: Optional[str] = None
     commercial_risk: Optional[str] = None
     prompt_cn_explanation: Optional[str] = None
+    visual_asset_type: Optional[str] = None
+    visual_asset_type_confidence: Optional[int] = Field(default=None, ge=0, le=100)
+    visual_asset_type_reason: Optional[str] = None
     tags: Optional[List[str]] = None
+
+
+class PromptPairBatchUpdate(BaseModel):
+    ids: List[int] = Field(default_factory=list)
+    selection_status: Optional[str] = None
+    quality_level: Optional[str] = None
+    visual_asset_type: Optional[str] = None
+    tags: Optional[List[str]] = None
+
+
+class WebUiPromptCreate(BaseModel):
+    repo_id: Optional[int] = None
+    repo_name: Optional[str] = None
+    repo_url: Optional[str] = None
+    source_page_url: Optional[str] = None
+    source_file: Optional[str] = None
+    source_heading: Optional[str] = None
+    line_start: int = 0
+    line_end: int = 0
+    asset_group: str = "design_spec"
+    asset_type: str = "component_prompt"
+    library_kind: Optional[str] = None
+    component_type: Optional[str] = None
+    page_type: Optional[str] = None
+    framework: Optional[str] = None
+    prompt_text: str
+    prompt_cn_translation: Optional[str] = None
+    design_rules: Optional[str] = None
+    ui_pattern: Optional[str] = None
+    screenshot_original_url: Optional[str] = None
+    screenshot_local_path: Optional[str] = None
+    screenshot_hash: Optional[str] = None
+    tags: Optional[List[str]] = None
+    quality_level: str = "pending_review"
+    selection_status: str = "pending_review"
+    reuse_value: Optional[str] = None
+    evidence: Optional[str] = None
+    confidence: int = Field(default=0, ge=0, le=100)
+    content_hash: Optional[str] = None
+    license: Optional[str] = None
+    commercial_risk: str = "unknown"
+    generated_by: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class WebUiPromptUpdate(BaseModel):
+    repo_id: Optional[int] = None
+    repo_name: Optional[str] = None
+    repo_url: Optional[str] = None
+    source_page_url: Optional[str] = None
+    source_file: Optional[str] = None
+    source_heading: Optional[str] = None
+    line_start: Optional[int] = None
+    line_end: Optional[int] = None
+    asset_group: Optional[str] = None
+    asset_type: Optional[str] = None
+    library_kind: Optional[str] = None
+    component_type: Optional[str] = None
+    page_type: Optional[str] = None
+    framework: Optional[str] = None
+    prompt_text: Optional[str] = None
+    prompt_cn_translation: Optional[str] = None
+    design_rules: Optional[str] = None
+    ui_pattern: Optional[str] = None
+    screenshot_original_url: Optional[str] = None
+    screenshot_local_path: Optional[str] = None
+    screenshot_hash: Optional[str] = None
+    tags: Optional[List[str]] = None
+    quality_level: Optional[str] = None
+    selection_status: Optional[str] = None
+    reuse_value: Optional[str] = None
+    evidence: Optional[str] = None
+    confidence: Optional[int] = Field(default=None, ge=0, le=100)
+    content_hash: Optional[str] = None
+    license: Optional[str] = None
+    commercial_risk: Optional[str] = None
+    generated_by: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class WebUiRepoProfileUpdate(BaseModel):
+    profile_type: Optional[str] = None
+    library_kind: Optional[str] = None
+    ui_stack: Optional[str] = None
+    supported_frontend_types: Optional[List[str]] = None
+    component_focus: Optional[List[str]] = None
+    style_keywords: Optional[List[str]] = None
+    reuse_mode: Optional[str] = None
+    summary_cn: Optional[str] = None
+    ai_summary_cn: Optional[str] = None
+    evidence: Optional[str] = None
+    ai_reason_cn: Optional[str] = None
+    confidence: Optional[int] = Field(default=None, ge=0, le=100)
+    quality_level: Optional[str] = None
+    selection_status: Optional[str] = None
+    commercial_risk: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class SkillRepoProfileUpdate(BaseModel):
+    skill_type: Optional[str] = None
+    target_platform: Optional[str] = None
+    runtime_stack: Optional[str] = None
+    capabilities: Optional[List[str]] = None
+    input_types: Optional[List[str]] = None
+    output_types: Optional[List[str]] = None
+    use_cases: Optional[List[str]] = None
+    tools: Optional[List[str]] = None
+    install_method: Optional[str] = None
+    configuration_notes: Optional[str] = None
+    reuse_mode: Optional[str] = None
+    summary_cn: Optional[str] = None
+    ai_summary_cn: Optional[str] = None
+    evidence: Optional[str] = None
+    ai_reason_cn: Optional[str] = None
+    tags: Optional[List[str]] = None
+    confidence: Optional[int] = Field(default=None, ge=0, le=100)
+    quality_level: Optional[str] = None
+    selection_status: Optional[str] = None
+    commercial_risk: Optional[str] = None
+    notes: Optional[str] = None
 
 
 class TagCreate(BaseModel):

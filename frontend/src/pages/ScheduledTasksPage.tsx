@@ -469,7 +469,7 @@ export function ScheduledTasksPage() {
           <CardHeader>
             <div className="text-xs text-muted-foreground">GitHub Repository Discovery</div>
             <CardTitle>任务列表</CardTitle>
-            <p className="text-xs text-muted-foreground">只发现 Web UI、图像生成、图像编辑、视频生成四类仓库，并写入资源库。</p>
+            <p className="text-xs text-muted-foreground">只发现 Web UI、图像生成、Skill 仓库、视频生成四类仓库，并写入资源库。</p>
           </CardHeader>
           <CardContent className="min-w-0">
             <Table className="min-w-[860px] table-fixed">

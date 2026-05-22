@@ -35,12 +35,13 @@ function FilterSelect({
 
 type FilterBarProps = {
   showSelection?: boolean;
+  showCategory?: boolean;
   leading?: ReactNode;
   trailing?: ReactNode;
   onReset?: () => void;
 };
 
-export function FilterBar({ showSelection = true, leading, trailing, onReset }: FilterBarProps) {
+export function FilterBar({ showSelection = true, showCategory = true, leading, trailing, onReset }: FilterBarProps) {
   const { category, qualityLevel, selectionStatus, setCategory, setQualityLevel, setSelectionStatus, reset } = useFilterStore();
   const handleReset = () => {
     reset();
@@ -52,12 +53,14 @@ export function FilterBar({ showSelection = true, leading, trailing, onReset }: 
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
         {leading && <div className="min-w-0 flex-1">{leading}</div>}
         <div className="flex flex-wrap items-center gap-3">
-          <FilterSelect
-            value={category}
-            placeholder="全部分类"
-            options={Object.entries(categoryLabels).map(([value, label]) => ({ value, label }))}
-            onChange={setCategory}
-          />
+          {showCategory && (
+            <FilterSelect
+              value={category}
+              placeholder="全部分类"
+              options={Object.entries(categoryLabels).map(([value, label]) => ({ value, label }))}
+              onChange={setCategory}
+            />
+          )}
           <FilterSelect
             value={qualityLevel}
             placeholder="全部等级"

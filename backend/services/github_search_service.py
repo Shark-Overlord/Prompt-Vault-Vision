@@ -20,8 +20,9 @@ from services.candidate_service import (
     should_scan_path,
 )
 from services.dedup_service import content_hash, get_existing_repo, infer_category, looks_like_forbidden_resource, normalize_github_url
-from services.prompt_service import build_cn_explanation, default_effect_review, extract_prompt_candidates, extract_prompt_effect_pairs, infer_scenario
-from utils.image_utils import download_image, extract_markdown_image_urls
+from services.prompt_service import build_cn_explanation, default_effect_review, extract_prompt_candidates, extract_prompt_effect_pairs, extract_prompt_video_pairs, infer_scenario
+from services.repo_discovery_filter import evaluate_repo_discovery_candidate
+from utils.image_utils import download_image, download_video_preview, extract_markdown_image_urls
 
 
 load_dotenv()
@@ -38,7 +39,7 @@ DISCOVERY_TRIGGER_MIN_RESULTS = 5
 DISCOVERY_CATEGORIES = {
     "web_ui_prompt",
     "image_generation_prompt",
-    "image_editing_prompt",
+    "skill_repository",
     "video_generation_prompt",
 }
 
@@ -231,7 +232,11 @@ def _repo_record(
     extracted = extract_candidate_data(documents, category, template=template, progress_callback=progress_callback)
     preview_images = extracted["preview_images"] or extract_markdown_image_urls(readme, base_url=raw_base_url)
     prompt_candidates = extracted["prompt_candidates"] or extract_prompt_candidates(readme, limit=8)
-    pair_candidates = extracted["pair_candidates"] or extract_prompt_effect_pairs(readme, base_url=raw_base_url, source_page_url=repo_url, limit=10_000)
+    pair_candidates = extracted["pair_candidates"] or (
+        extract_prompt_video_pairs(readme, base_url=raw_base_url, source_page_url=repo_url, limit=10_000)
+        if category == "video_generation_prompt"
+        else extract_prompt_effect_pairs(readme, base_url=raw_base_url, source_page_url=repo_url, limit=10_000)
+    )
     scanned_files = [document["path"] for document in documents]
     combined_content = "\n".join(document["content"] for document in documents)
     return {
@@ -267,7 +272,7 @@ def _repo_record(
     }
 
 
-def _repo_discovery_record(item: Dict[str, Any], keyword: str, category: str, readme: str) -> Dict[str, Any]:
+def _repo_discovery_record(item: Dict[str, Any], keyword: str, category: str, readme: str, evaluation: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     owner = item.get("owner", {}).get("login") or ""
     repo_name = item.get("name") or ""
     repo_url = item.get("html_url") or f"https://github.com/{owner}/{repo_name}"
@@ -276,6 +281,9 @@ def _repo_discovery_record(item: Dict[str, Any], keyword: str, category: str, re
     raw_base_url = f"https://raw.githubusercontent.com/{owner}/{repo_name}/HEAD/"
     preview_images = extract_markdown_image_urls(readme, base_url=raw_base_url)
     description = item.get("description") or ""
+    evaluation = evaluation or evaluate_repo_discovery_candidate(item, keyword, category, readme)
+    breakdown = evaluation.get("breakdown") or {}
+    reason_lines = "；".join((evaluation.get("reasons") or [])[:6])
     return {
         "repo_name": repo_name,
         "owner": owner,
@@ -288,8 +296,8 @@ def _repo_discovery_record(item: Dict[str, Any], keyword: str, category: str, re
         "parent_repo": None,
         "resource_type": "github_repo",
         "category": category,
-        "quality_level": "pending_review",
-        "status": "pending_review",
+        "quality_level": evaluation.get("quality_level") or "pending_review",
+        "status": evaluation.get("status") or "discovery_review",
         "summary": description or f"由关键词 {keyword} 发现的候选视觉 Prompt 仓库，待进入资源库扫描。",
         "local_note_path": None,
         "content_hash": content_hash(readme or description or repo_url),
@@ -304,6 +312,10 @@ def _repo_discovery_record(item: Dict[str, Any], keyword: str, category: str, re
         "notes": (
             f"GitHub 仓库发现：关键词 {keyword}；分类 {category}；"
             f"README 长度 {len(readme or '')}；候选预览图 {len(preview_images)}。"
+            f"发现分数 {evaluation.get('score', 0)}/100；结论：{evaluation.get('reason', '')}。"
+            f"分项：Prompt 密度 {breakdown.get('prompt_density', 0)}，目标相关性 {breakdown.get('target_relevance', 0)}，"
+            f"证据质量 {breakdown.get('evidence_quality', 0)}，复用价值 {breakdown.get('reusable_value', 0)}，仓库健康度 {breakdown.get('repo_health', 0)}。"
+            f"主要证据：{reason_lines}。"
             "此阶段只写入资源库，不扫描仓库内部 Prompt/图片；请在资源库页面执行扫描。"
         ),
         "_preview_images": preview_images,
@@ -383,6 +395,7 @@ async def _save_pairs_and_images(conn, repo_id: int, record: Dict[str, Any], pro
     candidates = record.get("_pair_candidates") or []
     saved = 0
     images_added = 0
+    category = record["category"]
 
     for candidate in candidates:
         if candidate.relation_type not in AUTO_SAVE_TYPES or candidate.confidence < 85:
@@ -393,6 +406,8 @@ async def _save_pairs_and_images(conn, repo_id: int, record: Dict[str, Any], pro
         asset = None
         if not asset_existing:
             asset = await download_image(candidate.image_url)
+            if not asset and category == "video_generation_prompt":
+                asset = await download_video_preview(candidate.image_url)
             if not asset:
                 if progress_callback:
                     progress_callback({"error_count_delta": 1})
@@ -447,8 +462,7 @@ async def _save_pairs_and_images(conn, repo_id: int, record: Dict[str, Any], pro
             continue
 
         now = utc_now()
-        category = record["category"]
-        review = f"{default_effect_review(True, candidate.relation_type)}\n证据：{candidate.evidence}"
+        review = f"{default_effect_review(True, candidate.relation_type, category)}\n证据：{candidate.evidence}"
         conn.execute(
             """
             INSERT INTO prompt_effect_pairs
@@ -552,6 +566,7 @@ async def run_incremental_search(categories: Optional[List[str]], keywords: Opti
             "duplicates": [],
             "skipped": [],
             "pending_review": [],
+            "discovery_review": [],
         }
         write_daily_report(report)
         with get_connection() as conn:
@@ -599,6 +614,7 @@ async def run_incremental_search(categories: Optional[List[str]], keywords: Opti
         "duplicates": [],
         "skipped": [],
         "pending_review": [],
+        "discovery_review": [],
         "prompt_pairs_added": 0,
         "images_added": 0,
         "candidate_images_added": 0,
@@ -623,10 +639,11 @@ async def run_incremental_search(categories: Optional[List[str]], keywords: Opti
             seen_repo_keys: set[str] = set()
 
             for search_type, qualifier, query in query_types:
+                sort_key = "stars" if search_type == "discovery" else "updated"
                 try:
                     response = await client.get(
                         f"{GITHUB_API}/search/repositories",
-                        params={"q": query, "sort": "stars", "order": "desc", "per_page": per_keyword_limit},
+                        params={"q": query, "sort": sort_key, "order": "desc", "per_page": per_keyword_limit},
                     )
                 except httpx.HTTPError as exc:
                     keyword_ok = False
@@ -639,7 +656,7 @@ async def run_incremental_search(categories: Optional[List[str]], keywords: Opti
                     try:
                         response = await client.get(
                             f"{GITHUB_API}/search/repositories",
-                            params={"q": fallback_query, "sort": "stars", "order": "desc", "per_page": per_keyword_limit},
+                            params={"q": fallback_query, "sort": sort_key, "order": "desc", "per_page": per_keyword_limit},
                         )
                     except httpx.HTTPError as exc:
                         keyword_ok = False
@@ -665,7 +682,7 @@ async def run_incremental_search(categories: Optional[List[str]], keywords: Opti
                     try:
                         fallback_response = await client.get(
                             f"{GITHUB_API}/search/repositories",
-                            params={"q": fallback_query, "sort": "stars", "order": "desc", "per_page": per_keyword_limit},
+                            params={"q": fallback_query, "sort": sort_key, "order": "desc", "per_page": per_keyword_limit},
                         )
                     except httpx.HTTPError as exc:
                         keyword_ok = False
@@ -695,16 +712,23 @@ async def run_incremental_search(categories: Optional[List[str]], keywords: Opti
                         continue
 
                     readme = await _get_readme(client, name)
-                    if not readme or len(readme) < 500:
-                        report["skipped"].append({"repo": name, "reason": "README 缺失或内容过少"})
-                        counts["skipped"] += 1
-                        continue
                     if looks_like_forbidden_resource(name, f"{item.get('description') or ''} {readme[:12000]}"):
                         report["skipped"].append({"repo": name, "reason": "README 命中禁止整理关键词"})
                         counts["skipped"] += 1
                         continue
 
-                    record = _repo_discovery_record(item, keyword, category, readme)
+                    evaluation = evaluate_repo_discovery_candidate(item, keyword, category, readme)
+                    if evaluation.get("decision") == "skip":
+                        report["skipped"].append(
+                            {
+                                "repo": name,
+                                "reason": f"{evaluation.get('reason', '发现评分未通过')}；分数 {evaluation.get('score', 0)}/100",
+                            }
+                        )
+                        counts["skipped"] += 1
+                        continue
+
+                    record = _repo_discovery_record(item, keyword, category, readme, evaluation=evaluation)
 
                     with get_connection() as conn:
                         action, repo_id = _insert_or_update_repo(conn, record)
@@ -715,7 +739,11 @@ async def run_incremental_search(categories: Optional[List[str]], keywords: Opti
                     else:
                         report["updated"].append(record["canonical_url"])
                         counts["updated"] += 1
-                    if record["status"] == "pending_review":
+                    if record["status"] == "discovery_review":
+                        report["discovery_review"].append(record["canonical_url"])
+                        report["pending_review"].append(record["canonical_url"])
+                        counts["pending"] += 1
+                    elif record["status"] == "pending_review":
                         report["pending_review"].append(record["canonical_url"])
                         counts["pending"] += 1
 
@@ -738,7 +766,7 @@ async def run_incremental_search(categories: Optional[List[str]], keywords: Opti
                         counts["duplicate"],
                         counts["skipped"],
                         counts["pending"],
-                        f"搜索窗口起点：{start}；状态：{'成功' if keyword_ok else '部分失败'}；仅发现 GitHub 仓库并写入资源库，仓库内容扫描在资源库页面执行。",
+                        f"搜索窗口起点：{start}；状态：{'成功' if keyword_ok else '部分失败'}；已按发现评分过滤仓库；仅发现 GitHub 仓库并写入资源库，仓库内容扫描在资源库页面执行。",
                         now,
                     ),
                 )
@@ -759,7 +787,7 @@ async def run_incremental_search(categories: Optional[List[str]], keywords: Opti
 
     report["summary"] = (
         f"仓库发现完成：新增仓库 {len(report['new'])}，更新仓库 {len(report['updated'])}，跳过 {len(report['skipped'])}，"
-        f"重复 {len(report['duplicates'])}，待复查 {len(report['pending_review'])}；"
+        f"重复 {len(report['duplicates'])}，待观察 {len(report['discovery_review'])}，待复查 {len(report['pending_review'])}；"
         f"GitHub total_count 合计 {report.get('github_total_count', 0)}，发现补扫返回 {report.get('discovery_results', 0)}；"
         "本阶段不会写入 Prompt 库或图片候选；请在资源库页面扫描仓库内容。"
     )
@@ -779,6 +807,7 @@ def write_daily_report(report: Dict[str, Any]) -> None:
         f"- 更新资源：{len(report.get('updated', []))}",
         f"- 跳过资源：{len(report.get('skipped', []))}",
         f"- 重复资源：{len(report.get('duplicates', []))}",
+        f"- 待观察仓库：{len(report.get('discovery_review', []))}",
         "- 相似资源：0",
         "- 新增 Prompt 效果对：0（仓库发现阶段不扫描仓库内容）",
         "- 新增配对候选：0（仓库发现阶段不扫描仓库内容）",
@@ -793,6 +822,10 @@ def write_daily_report(report: Dict[str, Any]) -> None:
         "## 更新资源",
         "",
         *[f"- {item}" for item in report.get("updated", [])],
+        "",
+        "## 待观察仓库",
+        "",
+        *[f"- {item}" for item in report.get("discovery_review", [])],
         "",
         "## 跳过资源",
         "",

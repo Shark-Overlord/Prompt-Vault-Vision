@@ -12,10 +12,15 @@ def test_should_scan_repo_content_paths():
     assert should_scan_path("case-template/case.yaml")
     assert should_scan_path("gpt-image-1/case.md")
     assert should_scan_path("docs/examples.md")
+    assert should_scan_path("components/pricing.md")
+    assert should_scan_path("design-system/rules.md")
+    assert should_scan_path("patterns/dashboard.prompt")
+    assert should_scan_path("docs/web-ui.txt")
     assert should_scan_path("examples/prompts.json")
     assert should_scan_path("prompts/product.csv")
     assert not should_scan_path("node_modules/pkg/README.md")
     assert not should_scan_path("src/app.tsx")
+    assert not should_scan_path("notes.txt")
 
 
 def test_json_object_prompt_image_pair_is_direct_candidate():
@@ -139,3 +144,82 @@ prompt: |
 
     assert len(data["pair_candidates"]) == 1
     assert data["pair_candidates"][0].source_file == "README.md"
+
+
+def test_video_markdown_case_prompt_video_pair_is_direct_candidate():
+    documents = [
+        {
+            "path": "README.md",
+            "content": """### Case 1: Veo product teaser
+#### Prompt
+```
+Create a cinematic 8-second product teaser for a transparent perfume bottle, with slow dolly-in camera movement, soft fog, reflective glass highlights, premium commercial lighting, and a clean dark studio backdrop.
+```
+
+#### Video
+https://github.com/user-attachments/assets/12345678-1234-1234-1234-123456789abc
+""",
+            "raw_base_url": "https://raw.githubusercontent.com/example/repo/main/",
+            "source_page_url": "https://github.com/example/repo/blob/main/README.md",
+        }
+    ]
+
+    data = extract_candidate_data(documents, "video_generation_prompt", total_pair_limit=5)
+
+    assert len(data["pair_candidates"]) == 1
+    pair = data["pair_candidates"][0]
+    assert pair.relation_type == "direct_pair"
+    assert pair.confidence >= 85
+    assert pair.image_url == "https://github.com/user-attachments/assets/12345678-1234-1234-1234-123456789abc"
+    assert "视频" in pair.evidence
+
+
+def test_video_json_prompt_video_pair_is_direct_candidate():
+    documents = [
+        {
+            "path": "examples/index.json",
+            "content": '[{"prompt":"Create a cinematic 10-second fashion video with runway pacing, dramatic backlight, reflective wet floor, elegant camera orbit, and synchronized fabric motion.","video_url":"./outputs/fashion.mp4"}]',
+            "raw_base_url": "https://raw.githubusercontent.com/example/repo/main/examples/",
+            "source_page_url": "https://github.com/example/repo/blob/main/examples/index.json",
+        }
+    ]
+
+    data = extract_candidate_data(documents, "video_generation_prompt", total_pair_limit=5)
+
+    assert len(data["pair_candidates"]) == 1
+    pair = data["pair_candidates"][0]
+    assert pair.relation_type == "direct_pair"
+    assert pair.image_url == "https://raw.githubusercontent.com/example/repo/main/examples/outputs/fashion.mp4"
+    assert "结构化对象配对" in pair.evidence
+
+
+def test_video_cross_file_numbered_prompt_and_video_map_pairs():
+    documents = [
+        {
+            "path": "README.md",
+            "content": """### No. 35: Seedance teaser
+
+#### Prompt
+```
+Create a 15-second ultra-realistic sci-fi teaser with three sequential shots, floating debris, blue rim lighting, slow orbital camera movement, and a dramatic final close-up.
+```
+""",
+            "raw_base_url": "https://raw.githubusercontent.com/example/repo/main/",
+            "source_page_url": "https://github.com/example/repo/blob/main/README.md",
+        },
+        {
+            "path": "video-urls.json",
+            "content": '{"prompts":{"35":"https://github.com/YouMind-OpenLab/awesome-seedance-2-prompts/releases/download/videos/35.mp4"}}',
+            "raw_base_url": "https://raw.githubusercontent.com/example/repo/main/",
+            "source_page_url": "https://github.com/example/repo/blob/main/video-urls.json",
+        },
+    ]
+
+    data = extract_candidate_data(documents, "video_generation_prompt", total_pair_limit=5)
+
+    assert len(data["pair_candidates"]) == 1
+    pair = data["pair_candidates"][0]
+    assert pair.source_file == "README.md"
+    assert pair.image_url.endswith("/videos/35.mp4")
+    assert pair.confidence == 96
+    assert "跨文件编号配对" in pair.evidence

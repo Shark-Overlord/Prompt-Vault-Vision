@@ -18,12 +18,13 @@ from services.prompt_service import (
     default_effect_review,
     extract_prompt_candidates,
     extract_prompt_effect_pairs,
+    extract_prompt_video_pairs,
     infer_scenario,
 )
-from utils.image_utils import download_image, extract_markdown_image_urls
+from utils.image_utils import download_image, download_video_preview, extract_markdown_image_urls
 
 
-SCAN_EXTENSIONS = {".md", ".mdx", ".json", ".jsonl", ".csv", ".yaml", ".yml"}
+SCAN_EXTENSIONS = {".md", ".mdx", ".json", ".jsonl", ".csv", ".yaml", ".yml", ".toml", ".txt", ".prompt"}
 SCAN_DIRS = (
     "",
     "case",
@@ -37,9 +38,20 @@ SCAN_DIRS = (
     "outputs",
     "output",
     "assets",
+    "components",
+    "design-system",
+    "design_system",
     "images",
+    "patterns",
     "screenshots",
+    "tools",
+    "skills",
+    "servers",
+    "scripts",
+    ".cursor",
+    ".claude",
 )
+LOOSE_TEXT_SCAN_DIRS = {"docs", "examples", "prompts", "components", "design-system", "design_system", "patterns", "samples"}
 PROMPT_KEYS = (
     "prompt",
     "prompt_cn",
@@ -73,6 +85,19 @@ IMAGE_KEYS = (
     "cover",
     "poster",
 )
+VIDEO_KEYS = (
+    "video",
+    "video_url",
+    "video_urls",
+    "output_video",
+    "result_video",
+    "example_video",
+    "clip",
+    "clip_url",
+    "demo_video",
+    "preview_video",
+    "mp4",
+)
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 AUTO_SAVE_TYPES = {"direct_pair", "likely_pair", "before_after_pair", "workflow_output", "video_thumbnail"}
 YAML_KEY_RE = re.compile(r"^(?P<indent>\s*)(?P<key>[A-Za-z0-9_-]+)\s*:\s*(?P<value>.*)$")
@@ -93,6 +118,8 @@ def should_scan_path(path: str) -> bool:
     if lowered.startswith(".git/") or "/.git/" in lowered:
         return False
     parts = lowered.split("/")
+    if suffix in {".txt", ".prompt"}:
+        return len(parts) > 1 and parts[0] in LOOSE_TEXT_SCAN_DIRS
     if parts[0].startswith("readme"):
         return True
     return parts[0] in SCAN_DIRS or len(parts) == 1
@@ -123,6 +150,20 @@ def _looks_like_url_or_image(value: Any) -> bool:
     if lower.startswith(("http://", "https://", "./", "../", "/")):
         return True
     return PurePosixPath(urlparse(lower).path).suffix in IMAGE_EXTENSIONS
+
+
+def _looks_like_url_or_video(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    lower = value.strip().lower()
+    if not lower:
+        return False
+    if "github.com/user-attachments/assets/" in lower:
+        return True
+    if lower.startswith(("http://", "https://", "./", "../", "/")):
+        ext = PurePosixPath(urlparse(lower).path).suffix.lower()
+        return ext in {".mp4", ".mov", ".webm", ".m4v", ".avi"} or "github.com/user-attachments/assets/" in lower
+    return PurePosixPath(urlparse(lower).path).suffix.lower() in {".mp4", ".mov", ".webm", ".m4v", ".avi"}
 
 
 def _resolve_image(base_url: str, value: str) -> str:
@@ -215,16 +256,19 @@ def _extract_structured_pairs_from_object(
     lowered = {str(key).lower(): key for key in obj.keys()}
     prompt_key = next((lowered[key] for key in prompt_keys if key in lowered and isinstance(obj.get(lowered[key]), str)), None)
     image_key = next((lowered[key] for key in image_keys if key in lowered and _looks_like_url_or_image(obj.get(lowered[key]))), None)
-    if prompt_key and image_key:
+    video_key = next((lowered[key] for key in image_keys if key in lowered and _looks_like_url_or_video(obj.get(lowered[key]))), None)
+    media_key = image_key or video_key
+    if prompt_key and media_key:
         prompt = " ".join(str(obj[prompt_key]).strip().split())
-        image_url = _resolve_image(base_url, str(obj[image_key]))
+        image_url = _resolve_image(base_url, str(obj[media_key]))
         if len(prompt) >= 24:
+            media_label = "视频" if video_key and media_key == video_key else "图片"
             pairs.append(
                 PromptEffectCandidate(
                     prompt=prompt,
                     image_url=image_url,
                     relation_type="direct_pair",
-                    evidence=f"结构化对象配对：{source_file} 中 {path_label} 同时包含 prompt 字段和 {image_key} 图片字段，属于强绑定。",
+                    evidence=f"结构化对象配对：{source_file} 中 {path_label} 同时包含 prompt 字段和 {media_key} {media_label}字段，属于强绑定。",
                     confidence=94,
                     source_page_url=source_page_url,
                     source_file=source_file,
@@ -244,7 +288,6 @@ def _extract_structured_pairs_from_object(
         if len(pairs) >= limit:
             break
     return pairs
-
 
 def _extract_json_pairs(content: str, base_url: str, source_page_url: str, source_file: str, limit: int, prompt_keys: Sequence[str], image_keys: Sequence[str]) -> List[PromptEffectCandidate]:
     pairs: List[PromptEffectCandidate] = []
@@ -268,18 +311,21 @@ def _extract_csv_pairs(content: str, base_url: str, source_page_url: str, source
         lowered = {str(key).lower(): key for key in (row or {}).keys()}
         prompt_key = next((lowered[key] for key in prompt_keys if key in lowered and row.get(lowered[key])), None)
         image_key = next((lowered[key] for key in image_keys if key in lowered and _looks_like_url_or_image(row.get(lowered[key]))), None)
-        if not prompt_key or not image_key:
+        video_key = next((lowered[key] for key in image_keys if key in lowered and _looks_like_url_or_video(row.get(lowered[key]))), None)
+        media_key = image_key or video_key
+        if not prompt_key or not media_key:
             continue
         prompt = " ".join(str(row[prompt_key]).strip().split())
         if len(prompt) < 24:
             continue
-        image_url = _resolve_image(base_url, str(row[image_key]))
+        image_url = _resolve_image(base_url, str(row[media_key]))
+        media_label = "视频" if video_key and media_key == video_key else "图片"
         pairs.append(
             PromptEffectCandidate(
                 prompt=prompt,
                 image_url=image_url,
                 relation_type="direct_pair",
-                evidence=f"CSV 行配对：{source_file} 第 {index} 行同时包含 prompt 列和 {image_key} 图片列，属于结构强绑定。",
+                evidence=f"CSV 行配对：{source_file} 第 {index} 行同时包含 prompt 列和 {media_key} {media_label}列，属于结构强绑定。",
                 confidence=92,
                 source_page_url=source_page_url,
                 source_file=source_file,
@@ -297,31 +343,33 @@ def _extract_csv_pairs(content: str, base_url: str, source_page_url: str, source
             break
     return pairs
 
-
 def _extract_yaml_pairs(content: str, base_url: str, source_page_url: str, source_file: str, limit: int, prompt_keys: Sequence[str], image_keys: Sequence[str]) -> List[PromptEffectCandidate]:
     pairs: List[PromptEffectCandidate] = []
     mapping, line_ranges = _parse_simple_yaml_mapping(content)
     prompt_key = next((key for key in prompt_keys if key in mapping and len(" ".join(mapping[key].split())) >= 24), None)
     image_key = next((key for key in image_keys if key in mapping and _looks_like_url_or_image(mapping[key])), None)
+    video_key = next((key for key in image_keys if key in mapping and _looks_like_url_or_video(mapping[key])), None)
+    media_key = image_key or video_key
 
-    if prompt_key and image_key:
+    if prompt_key and media_key:
         prompt = " ".join(mapping[prompt_key].split())
-        image_value = mapping[image_key]
+        media_value = mapping[media_key]
         prompt_range = line_ranges.get(prompt_key, (0, 0))
-        image_range = line_ranges.get(image_key, (0, 0))
+        media_range = line_ranges.get(media_key, (0, 0))
         heading = mapping.get("title") or mapping.get("name") or mapping.get("alt_text") or "YAML"
+        media_label = "视频" if video_key and media_key == video_key else "图片"
         pairs.append(
             PromptEffectCandidate(
                 prompt=prompt,
-                image_url=_resolve_image(base_url, image_value),
+                image_url=_resolve_image(base_url, media_value),
                 relation_type="direct_pair",
-                evidence=f"YAML 对象强绑定：{source_file} 同一顶层对象同时包含 {prompt_key} 提示词字段和 {image_key} 图片字段，字段顺序不影响匹配，属于明确 Prompt-效果图配对。",
+                evidence=f"YAML 对象强绑定：{source_file} 同一顶层对象同时包含 {prompt_key} 提示词字段和 {media_key} {media_label}字段，字段顺序不影响匹配。",
                 confidence=94,
                 source_page_url=source_page_url,
                 source_file=source_file,
                 source_heading=heading,
                 line_start=prompt_range[0],
-                line_end=max(prompt_range[1], image_range[1]),
+                line_end=max(prompt_range[1], media_range[1]),
                 structural_score=60,
                 distance_score=20,
                 filename_score=6,
@@ -340,13 +388,14 @@ def _extract_yaml_pairs(content: str, base_url: str, source_page_url: str, sourc
         value = match.group(2).strip().strip("\"'")
         if key in prompt_keys and len(value) >= 24:
             prompt_line = (index, value)
-        elif key in image_keys and prompt_line and _looks_like_url_or_image(value):
+        elif key in image_keys and prompt_line and (_looks_like_url_or_image(value) or _looks_like_url_or_video(value)):
+            media_label = "视频" if _looks_like_url_or_video(value) else "图片"
             pairs.append(
                 PromptEffectCandidate(
                     prompt=" ".join(prompt_line[1].split()),
                     image_url=_resolve_image(base_url, value),
                     relation_type="likely_pair",
-                    evidence=f"YAML 邻近字段配对：{source_file} 中 prompt 字段与 {key} 图片字段相邻，需人工复查。",
+                    evidence=f"YAML 邻近字段配对：{source_file} 中 prompt 字段与 {key} {media_label}字段相邻，需要人工复查。",
                     confidence=78,
                     source_page_url=source_page_url,
                     source_file=source_file,
@@ -365,7 +414,6 @@ def _extract_yaml_pairs(content: str, base_url: str, source_page_url: str, sourc
             break
     return pairs
 
-
 def _natural_document_path_key(path: str) -> List[Any]:
     return [int(part) if part.isdigit() else part for part in re.split(r"(\d+)", path)]
 
@@ -380,6 +428,120 @@ def _document_scan_priority(document: Dict[str, str]) -> Tuple[int, List[Any]]:
     if path.startswith(("examples/", "prompts/", "samples/")):
         return (2, _natural_document_path_key(path))
     return (3, _natural_document_path_key(path))
+
+
+NUMBERED_VIDEO_CASE_RE = re.compile(r"(?im)^###\s+(?:No\.?|Case)\s*(?P<case_id>\d+)\b[^\n]*$")
+PROMPT_SECTION_RE = re.compile(r"(?im)^#{4,6}\s+.*?\bprompt\b.*$")
+
+
+def _extract_numbered_case_prompts_from_markdown(document: Dict[str, str]) -> Dict[str, Dict[str, Any]]:
+    content = document.get("content") or ""
+    matches = list(NUMBERED_VIDEO_CASE_RE.finditer(content))
+    results: Dict[str, Dict[str, Any]] = {}
+    for index, match in enumerate(matches):
+        case_id = match.group("case_id")
+        block_start = match.start()
+        block_end = matches[index + 1].start() if index + 1 < len(matches) else len(content)
+        block = content[block_start:block_end]
+        prompt = ""
+        prompt_heading = PROMPT_SECTION_RE.search(block)
+        if prompt_heading:
+            prompt_block = block[prompt_heading.end():]
+            prompt_candidates = extract_prompt_candidates(prompt_block, limit=3)
+            if prompt_candidates:
+                prompt = prompt_candidates[0]
+        if not prompt:
+            prompt_candidates = extract_prompt_candidates(block, limit=3)
+            if prompt_candidates:
+                prompt = prompt_candidates[0]
+        if not prompt:
+            continue
+        prompt_pos = block.find(prompt)
+        line_start = _line_number(content, block_start + max(prompt_pos, 0))
+        line_end = line_start + max(prompt.count("\n"), 0)
+        results[case_id] = {
+            "prompt": prompt,
+            "source_file": document.get("path") or "",
+            "source_page_url": document.get("source_page_url") or "",
+            "source_heading": _clean_heading(match.group(0)),
+            "line_start": line_start,
+            "line_end": line_end,
+        }
+    return results
+
+
+def _clean_heading(text: str) -> str:
+    return re.sub(r"^#+\s*", "", (text or "").strip())
+
+
+def _extract_numbered_video_map(document: Dict[str, str]) -> Dict[str, str]:
+    path = (document.get("path") or "").lower()
+    if not path.endswith((".json", ".jsonl")):
+        return {}
+    try:
+        payload = json.loads(document.get("content") or "{}")
+    except Exception:
+        return {}
+    candidates: Dict[str, Any] = {}
+    if isinstance(payload, dict):
+        for key in ("prompts", "videos", "video_urls", "results"):
+            if isinstance(payload.get(key), dict):
+                candidates = payload[key]
+                break
+        if not candidates:
+            candidates = payload
+    result: Dict[str, str] = {}
+    if not isinstance(candidates, dict):
+        return result
+    base_url = document.get("raw_base_url") or ""
+    for key, value in candidates.items():
+        case_id = str(key).strip()
+        if not re.fullmatch(r"\d+", case_id):
+            continue
+        if not _looks_like_url_or_video(value):
+            continue
+        result[case_id] = _resolve_image(base_url, str(value))
+    return result
+
+
+def _extract_cross_file_numbered_video_pairs(documents: Sequence[Dict[str, str]], limit: Optional[int]) -> List[PromptEffectCandidate]:
+    prompt_cases: Dict[str, Dict[str, Any]] = {}
+    video_map: Dict[str, str] = {}
+    for document in documents:
+        path = (document.get("path") or "").lower()
+        if path.endswith((".md", ".mdx")):
+            prompt_cases.update(_extract_numbered_case_prompts_from_markdown(document))
+        elif path.endswith((".json", ".jsonl")):
+            video_map.update(_extract_numbered_video_map(document))
+
+    pairs: List[PromptEffectCandidate] = []
+    max_count = FULL_SCAN_LIMIT if limit is None else max(0, int(limit))
+    for case_id, payload in prompt_cases.items():
+        video_url = video_map.get(case_id)
+        if not video_url:
+            continue
+        pairs.append(
+            PromptEffectCandidate(
+                prompt=payload["prompt"],
+                image_url=video_url,
+                relation_type="direct_pair",
+                evidence=f"跨文件编号配对：Markdown 案例 {case_id} 提供 Prompt，结构化文件提供同编号视频链接，属于强绑定。",
+                confidence=96,
+                source_page_url=payload["source_page_url"],
+                source_file=payload["source_file"],
+                source_heading=payload["source_heading"],
+                line_start=payload["line_start"],
+                line_end=payload["line_end"],
+                structural_score=62,
+                distance_score=20,
+                filename_score=8,
+                semantic_score=6,
+                penalty_score=0,
+            )
+        )
+        if len(pairs) >= max_count:
+            break
+    return pairs
 
 
 def _remaining_limit(current_count: int, total_limit: Optional[int]) -> int:
@@ -421,32 +583,46 @@ def extract_candidate_data(
     preview_images: List[str] = []
     pair_candidates: List[PromptEffectCandidate] = []
     seen_pairs: set[Tuple[str, str]] = set()
-    seen_image_urls: set[str] = set()
+    seen_media_urls: set[str] = set()
     prompt_keys = _merge_keys(PROMPT_KEYS, _template_string_values(template, ("prompt_locators", "prompt_field_names")))
-    image_keys = _merge_keys(IMAGE_KEYS, _template_string_values(template, ("image_locators", "image_field_names")))
+    media_keys = _merge_keys((*IMAGE_KEYS, *VIDEO_KEYS), _template_string_values(template, ("image_locators", "image_field_names", "video_locators", "video_field_names")))
 
     sorted_documents = sorted(documents, key=_document_scan_priority)
     total_files = len(sorted_documents)
+
+    if category == "video_generation_prompt":
+        cross_file_pairs = _extract_cross_file_numbered_video_pairs(sorted_documents, total_pair_limit)
+        for pair in cross_file_pairs:
+            key = (pair.prompt, pair.image_url)
+            if key in seen_pairs or pair.image_url in seen_media_urls:
+                continue
+            seen_pairs.add(key)
+            seen_media_urls.add(pair.image_url)
+            pair_candidates.append(pair)
+
     for index, document in enumerate(sorted_documents, start=1):
         if total_pair_limit is not None and len(pair_candidates) >= total_pair_limit:
             break
-        path = document["path"]
+        path_value = document["path"]
         content = document["content"]
         base_url = document.get("raw_base_url") or ""
         source_page_url = document.get("source_page_url") or ""
-        suffix = PurePosixPath(path).suffix.lower()
+        suffix = PurePosixPath(path_value).suffix.lower()
         pair_limit = _remaining_limit(len(pair_candidates), total_pair_limit)
 
         prompt_candidates.extend(extract_prompt_candidates(content, limit=50))
         if suffix in {".md", ".mdx"}:
             preview_images.extend(extract_markdown_image_urls(content, base_url=base_url))
-            pairs = extract_prompt_effect_pairs(content, base_url=base_url, source_page_url=source_page_url, limit=pair_limit)
+            if category == "video_generation_prompt":
+                pairs = extract_prompt_video_pairs(content, base_url=base_url, source_page_url=source_page_url, limit=pair_limit)
+            else:
+                pairs = extract_prompt_effect_pairs(content, base_url=base_url, source_page_url=source_page_url, limit=pair_limit)
         elif suffix in {".json", ".jsonl"}:
-            pairs = _extract_json_pairs(content, base_url, source_page_url, path, pair_limit, prompt_keys, image_keys)
+            pairs = _extract_json_pairs(content, base_url, source_page_url, path_value, pair_limit, prompt_keys, media_keys)
         elif suffix == ".csv":
-            pairs = _extract_csv_pairs(content, base_url, source_page_url, path, pair_limit, prompt_keys, image_keys)
+            pairs = _extract_csv_pairs(content, base_url, source_page_url, path_value, pair_limit, prompt_keys, media_keys)
         elif suffix in {".yaml", ".yml"}:
-            pairs = _extract_yaml_pairs(content, base_url, source_page_url, path, pair_limit, prompt_keys, image_keys)
+            pairs = _extract_yaml_pairs(content, base_url, source_page_url, path_value, pair_limit, prompt_keys, media_keys)
         else:
             pairs = []
 
@@ -454,14 +630,14 @@ def extract_candidate_data(
             key = (pair.prompt, pair.image_url)
             if key in seen_pairs:
                 continue
-            if pair.image_url in seen_image_urls:
+            if pair.image_url in seen_media_urls:
                 continue
             seen_pairs.add(key)
-            seen_image_urls.add(pair.image_url)
+            seen_media_urls.add(pair.image_url)
             pair_candidates.append(
                 replace(
                     pair,
-                    source_file=pair.source_file or path,
+                    source_file=pair.source_file or path_value,
                     source_page_url=pair.source_page_url or source_page_url,
                 )
             )
@@ -472,7 +648,7 @@ def extract_candidate_data(
                 {
                     "total_files": total_files,
                     "processed_files": index,
-                    "current_file": path,
+                    "current_file": path_value,
                     "prompt_candidates": len(prompt_candidates),
                     "pair_candidates": len(pair_candidates),
                     "total_images": len(preview_images) + len({pair.image_url for pair in pair_candidates}),
@@ -484,7 +660,6 @@ def extract_candidate_data(
         "preview_images": list(dict.fromkeys(preview_images)),
         "pair_candidates": pair_candidates if total_pair_limit is None else pair_candidates[:total_pair_limit],
     }
-
 
 def _candidate_review_status(candidate: PromptEffectCandidate, license_value: str) -> Tuple[str, str]:
     reasons: List[str] = []
@@ -521,6 +696,8 @@ async def save_pair_candidates(
         if progress_callback:
             progress_callback({"current_file": candidate.source_file, "phase": "download_candidate_image"})
         asset = await download_image(candidate.image_url)
+        if not asset and category == "video_generation_prompt":
+            asset = await download_video_preview(candidate.image_url)
         if not asset:
             if progress_callback:
                 progress_callback({"error_count_delta": 1})

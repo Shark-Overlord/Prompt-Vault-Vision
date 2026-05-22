@@ -20,6 +20,8 @@ import type {
   GithubDeviceStart,
   Paginated,
   PairCandidate,
+  PromptPairBatchUpdate,
+  PromptPairBatchUpdateResult,
   PromptPair,
   PromptPairPatch,
   Repo,
@@ -34,9 +36,12 @@ import type {
   RepoScanTemplate,
   ScheduledTask,
   ScheduledTaskPayload,
+  SkillRepoProfile,
   Tag,
   TaskRun,
-  VisualAsset
+  VisualAsset,
+  WebUiRepoProfile,
+  WebUiPrompt
 } from "./types";
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
@@ -96,6 +101,18 @@ export const api = {
   promptPair: (id: number) => request<PromptPair>(`/api/prompt-pairs/${id}`),
   updatePromptPair: (id: number, payload: PromptPairPatch) =>
     request<PromptPair>(`/api/prompt-pairs/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  batchUpdatePromptPairs: (payload: PromptPairBatchUpdate) =>
+    request<PromptPairBatchUpdateResult>("/api/prompt-pairs/batch-update", { method: "POST", body: JSON.stringify(payload) }),
+  webUiPrompts: (filters: Record<string, unknown>) => request<Paginated<WebUiPrompt>>(`/api/web-ui-prompts?${params(filters)}`),
+  webUiPrompt: (id: number) => request<WebUiPrompt>(`/api/web-ui-prompts/${id}`),
+  webUiRepoProfiles: (filters: Record<string, unknown>) => request<Paginated<WebUiRepoProfile>>(`/api/web-ui-repo-profiles?${params(filters)}`),
+  webUiRepoProfile: (id: number) => request<WebUiRepoProfile>(`/api/web-ui-repo-profiles/${id}`),
+  updateWebUiRepoProfile: (id: number, payload: Partial<WebUiRepoProfile>) =>
+    request<WebUiRepoProfile>(`/api/web-ui-repo-profiles/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  skillRepoProfiles: (filters: Record<string, unknown>) => request<Paginated<SkillRepoProfile>>(`/api/skill-repo-profiles?${params(filters)}`),
+  skillRepoProfile: (id: number) => request<SkillRepoProfile>(`/api/skill-repo-profiles/${id}`),
+  updateSkillRepoProfile: (id: number, payload: Partial<SkillRepoProfile>) =>
+    request<SkillRepoProfile>(`/api/skill-repo-profiles/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
   pairCandidates: (filters: Record<string, unknown>) => request<Paginated<PairCandidate>>(`/api/pair-candidates?${params(filters)}`),
   updatePairCandidate: (id: number, payload: { review_status: string; review_reason?: string }) =>
     request<PairCandidate>(`/api/pair-candidates/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),

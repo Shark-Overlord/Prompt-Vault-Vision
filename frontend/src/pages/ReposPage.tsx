@@ -62,6 +62,7 @@ const defaultForm: RepoForm = {
 
 const qualityOptions = [
   ["pending_review", "待复查"],
+  ["candidate_review", "待观察"],
   ["excellent", "高价值"],
   ["good", "可复用"],
   ["normal", "普通"],
@@ -71,6 +72,8 @@ const qualityOptions = [
 
 const statusOptions = [
   ["pending_review", "待复查"],
+  ["ready_to_scan", "待扫描"],
+  ["discovery_review", "待观察"],
   ["active", "可用"],
   ["featured", "精选"],
   ["reference", "仅参考"],

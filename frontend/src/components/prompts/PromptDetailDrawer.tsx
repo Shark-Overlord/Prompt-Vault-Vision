@@ -1,9 +1,11 @@
-import { Copy, ExternalLink } from "lucide-react";
+import { Copy, ExternalLink, Star } from "lucide-react";
 import type { PromptPair, PromptPairPatch } from "../../lib/types";
+import { visualAssetTypeLabels, visualAssetTypes } from "../../lib/constants";
 import { assetUrl } from "../../lib/utils";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "../ui/sheet";
 import { Textarea } from "../ui/textarea";
 import { SelectionStatusSwitch } from "./SelectionStatusSwitch";
@@ -12,12 +14,19 @@ import { TagSelector } from "./TagSelector";
 export function PromptDetailDrawer({
   pair,
   onClose,
-  onUpdate
+  onUpdate,
+  favoriteOnly = false
 }: {
   pair: PromptPair | null;
   onClose: () => void;
   onUpdate: (payload: PromptPairPatch) => void;
+  favoriteOnly?: boolean;
 }) {
+  const isFavorite = pair?.selection_status === "featured";
+  const isDraftAnnotation = pair?.annotation_display_status === "draft";
+  const displayCn = pair?.prompt_cn_explanation?.trim() || pair?.latest_suggested_cn_explanation?.trim() || "";
+  const displayTags = pair?.tags?.length ? pair.tags : pair?.latest_suggested_tags || [];
+
   return (
     <Sheet open={Boolean(pair)} onOpenChange={(open) => !open && onClose()}>
       <SheetContent className="w-[86vw] overflow-y-auto data-[side=right]:sm:max-w-5xl">
@@ -40,17 +49,45 @@ export function PromptDetailDrawer({
                 </Card>
                 <div className="flex flex-wrap gap-2">
                   <Badge>{pair.category}</Badge>
-                  <Badge variant="secondary">{pair.scenario}</Badge>
+                  {pair.scenario ? <Badge variant="secondary">{pair.scenario}</Badge> : null}
                   <Badge variant={pair.commercial_risk === "unknown" ? "outline" : "secondary"}>商用风险：{pair.commercial_risk || "unknown"}</Badge>
+                  {isFavorite ? <Badge className="border-amber-300/40 bg-amber-300/10 text-amber-200" variant="outline">已收藏</Badge> : null}
+                  {isDraftAnnotation ? <Badge variant="outline">草稿待审</Badge> : null}
                 </div>
               </div>
               <div className="space-y-5">
                 <Card>
                   <CardHeader>
-                    <CardTitle>筛选结论</CardTitle>
+                    <CardTitle>{favoriteOnly ? "收藏" : "筛选结论"}</CardTitle>
                   </CardHeader>
-                  <CardContent>
-                    <SelectionStatusSwitch value={pair.selection_status} onChange={(value) => onUpdate({ selection_status: value })} />
+                  <CardContent className="space-y-4">
+                    {favoriteOnly ? (
+                      <Button
+                        variant={isFavorite ? "secondary" : "outline"}
+                        onClick={() => onUpdate({ selection_status: isFavorite ? "normal" : "featured" })}
+                      >
+                        <Star className={isFavorite ? "h-4 w-4 fill-current text-amber-300" : "h-4 w-4"} />
+                        {isFavorite ? "已收藏，点击取消" : "收藏这条 Prompt"}
+                      </Button>
+                    ) : (
+                      <SelectionStatusSwitch value={pair.selection_status} onChange={(value) => onUpdate({ selection_status: value })} />
+                    )}
+                    <div className="space-y-2">
+                      <div className="text-xs text-muted-foreground">视觉用途</div>
+                      <Select value={pair.visual_asset_type || "uncategorized"} onValueChange={(value) => onUpdate({ visual_asset_type: value })}>
+                        <SelectTrigger className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {visualAssetTypes.map((type) => (
+                            <SelectItem key={type} value={type}>
+                              {visualAssetTypeLabels[type]}
+                            </SelectItem>
+                          ))}
+                          <SelectItem value="uncategorized">未分类</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </CardContent>
                 </Card>
                 <Card>
@@ -81,10 +118,10 @@ export function PromptDetailDrawer({
                 </Card>
                 <Card>
                   <CardHeader>
-                    <CardTitle>中文翻译</CardTitle>
+                    <CardTitle>{isDraftAnnotation ? "中文翻译草稿" : "中文翻译"}</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <p className="text-sm leading-6 text-muted-foreground">{pair.prompt_cn_explanation || "暂无"}</p>
+                    <p className="text-sm leading-6 text-muted-foreground">{displayCn || "暂无"}</p>
                   </CardContent>
                 </Card>
                 <Card>
@@ -100,7 +137,7 @@ export function PromptDetailDrawer({
                     <CardTitle>相关标签</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <TagSelector tags={pair.tags || []} onChange={(tags) => onUpdate({ tags })} />
+                    <TagSelector tags={displayTags} onChange={(tags) => onUpdate({ tags })} />
                   </CardContent>
                 </Card>
                 <div className="flex flex-wrap gap-2">
@@ -108,9 +145,11 @@ export function PromptDetailDrawer({
                     <ExternalLink className="h-4 w-4" />
                     打开来源
                   </Button>
-                  <Button variant="outline" onClick={() => onUpdate({ commercial_risk: "unknown", selection_status: "pending_review" })}>
-                    标记待复查
-                  </Button>
+                  {!favoriteOnly ? (
+                    <Button variant="outline" onClick={() => onUpdate({ commercial_risk: "unknown", selection_status: "pending_review" })}>
+                      标记待复查
+                    </Button>
+                  ) : null}
                 </div>
               </div>
             </div>

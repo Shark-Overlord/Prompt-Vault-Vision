@@ -23,19 +23,20 @@ VALID_SCHEDULE_TYPES = {"interval_minutes", "daily_time", "weekly_time"}
 VALID_REPO_CATEGORIES = {
     "web_ui_prompt",
     "image_generation_prompt",
-    "image_editing_prompt",
+    "skill_repository",
     "video_generation_prompt",
 }
 TIME_RE = re.compile(r"^\d{2}:\d{2}$")
 DEFAULT_TASK_CATEGORY_TIMES = {
     "web_ui_prompt": ("默认检索｜Web UI Prompt", "09:10"),
     "image_generation_prompt": ("默认检索｜图像生成 Prompt", "12:10"),
-    "image_editing_prompt": ("默认检索｜图像编辑 Prompt", "15:10"),
+    "skill_repository": ("默认检索｜Skill 仓库", "15:10"),
     "video_generation_prompt": ("默认检索｜视频生成 Prompt", "18:10"),
 }
 
 _scheduler_task: Optional[asyncio.Task] = None
 _task_locks: Dict[int, asyncio.Lock] = {}
+LEGACY_IMAGE_EDITING_TASK_CLAUSE = "(categories IS NULL OR categories NOT LIKE '%image_editing_prompt%')"
 
 
 def _json_dumps(value: Optional[List[str]]) -> Optional[str]:
@@ -138,7 +139,7 @@ def validate_task_payload(data: Dict[str, Any]) -> Dict[str, Any]:
     if categories:
         invalid_categories = [category for category in categories if category not in VALID_REPO_CATEGORIES]
         if invalid_categories:
-            raise ValueError("定时任务只能检索 Web UI、图像生成、图像编辑、视频生成这四类仓库")
+            raise ValueError("定时任务只能检索 Web UI、图像生成、Skill 仓库、视频生成这四类仓库")
 
     return {
         **data,
@@ -190,14 +191,19 @@ def calculate_next_run_at(task: Dict[str, Any], from_dt: Optional[datetime] = No
 
 
 def list_tasks() -> List[Dict[str, Any]]:
-    return [_task_to_public(row) for row in fetch_all("SELECT * FROM scheduled_tasks ORDER BY updated_at DESC, id DESC")]
+    return [
+        _task_to_public(row)
+        for row in fetch_all(
+            f"SELECT * FROM scheduled_tasks WHERE {LEGACY_IMAGE_EDITING_TASK_CLAUSE} ORDER BY updated_at DESC, id DESC"
+        )
+    ]
 
 
 def list_tasks_paginated(page: int = 1, page_size: int = 20, search: Optional[str] = None, status: Optional[str] = None) -> Dict[str, Any]:
     page = max(1, int(page or 1))
     page_size = min(max(1, int(page_size or 20)), 100)
     offset = (page - 1) * page_size
-    where = ["1 = 1"]
+    where = [LEGACY_IMAGE_EDITING_TASK_CLAUSE]
     params: List[Any] = []
     if search:
         where.append("(name LIKE ? OR categories LIKE ? OR keywords LIKE ? OR last_summary LIKE ? OR last_error LIKE ?)")
@@ -281,6 +287,8 @@ def ensure_default_category_tasks() -> List[Dict[str, Any]]:
         }
 
         for category, (name, daily_time) in DEFAULT_TASK_CATEGORY_TIMES.items():
+            if category not in VALID_REPO_CATEGORIES:
+                continue
             if name in existing_names:
                 continue
             data = validate_task_payload(
@@ -353,6 +361,17 @@ def ensure_default_category_tasks() -> List[Dict[str, Any]]:
             """,
             ("资源库内容扫描已从定时任务移除；请在资源库页面对仓库执行手动或批量扫描。", now),
         )
+        conn.execute(
+            """
+            UPDATE scheduled_tasks
+            SET status = 'paused',
+                next_run_at = NULL,
+                running = 0,
+                updated_at = ?
+            WHERE categories LIKE '%image_editing_prompt%'
+            """,
+            (now,),
+        )
 
     return created
 
@@ -367,6 +386,7 @@ def repair_stale_next_run_times(from_dt: Optional[datetime] = None) -> int:
         WHERE status = 'active'
           AND task_type = ?
           AND running = 0
+          AND (categories IS NULL OR categories NOT LIKE '%image_editing_prompt%')
         """,
         (TASK_TYPE_GITHUB,),
     )
@@ -585,6 +605,7 @@ async def scan_due_tasks() -> None:
         WHERE status = 'active'
           AND next_run_at IS NOT NULL
           AND next_run_at <= ?
+          AND (categories IS NULL OR categories NOT LIKE '%image_editing_prompt%')
         ORDER BY next_run_at ASC, id ASC
         """,
         (now,),

@@ -70,10 +70,10 @@ def looks_like_forbidden_resource(name: str, description: str = "") -> bool:
 
 def infer_category(keyword: str, fallback: str = "image_generation_prompt") -> str:
     text = keyword.lower()
+    if any(x in text for x in ("skill", "mcp", "agent tool", "toolkit", "cursor rules", "claude code", "workflow")):
+        return "skill_repository"
     if any(x in text for x in ("web", "ui", "frontend", "landing", "dashboard", "saas", "shadcn", "tailwind", "component")):
         return "web_ui_prompt"
-    if any(x in text for x in ("edit", "retouch", "background", "object removal", "variation", "style transfer")):
-        return "image_editing_prompt"
     if any(x in text for x in ("video", "cinematic", "storyboard", "veo", "kling", "runway", "seedance", "wan")):
         return "video_generation_prompt"
     return fallback

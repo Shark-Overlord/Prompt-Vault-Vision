@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 
 from database import PROJECT_ROOT, init_db
 from agents.runtime import ensure_agent_runtime
-from routes import agent, ai_configs, annotations, assets, auth, dashboard, export, pair_candidates, prompt_pairs, repo_templates, repos, scheduled_tasks, search, tags
+from routes import agent, ai_configs, annotations, assets, auth, dashboard, export, pair_candidates, prompt_pairs, repo_templates, repos, scheduled_tasks, search, skill_repo_profiles, tags, web_ui_prompts, web_ui_repo_profiles
 from routes import repo_scan_runs
 from services.annotation_service import start_annotation_worker, stop_annotation_worker
 from services.repo_scan_job_service import start_repo_scan_worker, stop_repo_scan_worker
@@ -61,6 +61,9 @@ app.include_router(repos.router)
 app.include_router(repo_scan_runs.router)
 app.include_router(repo_templates.router)
 app.include_router(prompt_pairs.router)
+app.include_router(web_ui_prompts.router)
+app.include_router(web_ui_repo_profiles.router)
+app.include_router(skill_repo_profiles.router)
 app.include_router(pair_candidates.router)
 app.include_router(assets.router)
 app.include_router(search.router)

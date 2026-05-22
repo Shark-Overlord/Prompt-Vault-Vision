@@ -12,17 +12,21 @@ from database import fetch_one, get_connection, utc_now
 from agents.repo_template_graph import generate_template_from_scan, get_active_template, get_template, validate_template_content
 from services.auth_service import get_stored_token
 from services.candidate_service import save_pair_candidates
-from services.dedup_service import infer_category, normalize_github_url
+from services.dedup_service import content_hash, infer_category, normalize_github_url
 from services.github_search_service import (
     GITHUB_API,
     _get_readme,
     _get_repo_documents,
     _insert_or_update_repo,
+    _license_from_item_or_readme,
     _repo_record,
     _save_pairs_and_images,
     headers,
 )
 from services.ai_pair_assist_service import assist_record_pair_candidates
+from services.skill_repo_profile_service import build_skill_repo_profile, save_skill_repo_profile
+from services.web_ui_repo_profile_service import build_web_ui_repo_profile, save_web_ui_repo_profile
+from utils.image_utils import extract_markdown_image_urls
 
 
 class RepoScanError(Exception):
@@ -232,6 +236,130 @@ def _matches_pattern(path: str, pattern: str) -> bool:
     return False
 
 
+async def _web_ui_repo_record(
+    item: Dict[str, Any],
+    keyword: str,
+    category: str,
+    readme: str,
+    documents: list[Dict[str, str]],
+    ai_config_id: Optional[int] = None,
+    progress_callback=None,
+) -> Dict[str, Any]:
+    owner = item.get("owner", {}).get("login") or ""
+    repo_name = item.get("name") or ""
+    repo_url = item.get("html_url") or f"https://github.com/{owner}/{repo_name}"
+    canonical_url = normalize_github_url(repo_url) or repo_url
+    now = utc_now()
+    raw_base_url = f"https://raw.githubusercontent.com/{owner}/{repo_name}/HEAD/"
+    profile = await build_web_ui_repo_profile(
+        repo_name=repo_name,
+        repo_url=repo_url,
+        readme=readme,
+        documents=documents,
+        ai_config_id=ai_config_id,
+        progress_callback=progress_callback,
+    )
+    preview_images = [profile.screenshot_original_url] if profile.screenshot_original_url else extract_markdown_image_urls(readme, base_url=raw_base_url)
+    scanned_files = [document["path"] for document in documents]
+    combined_content = "\n".join(document["content"] for document in documents)
+    extracted = {"prompt_candidates": [profile.summary_cn]}
+    web_ui_assets = [profile]
+    return {
+        "repo_name": repo_name,
+        "owner": owner,
+        "repo_url": repo_url,
+        "canonical_url": canonical_url,
+        "stars": int(item.get("stargazers_count") or 0),
+        "forks": int(item.get("forks_count") or 0),
+        "license": _license_from_item_or_readme(item, readme),
+        "is_fork": 1 if item.get("fork") else 0,
+        "parent_repo": None,
+        "resource_type": "github_repo",
+        "category": category,
+        "quality_level": "pending_review",
+        "status": "pending_review",
+        "summary": item.get("description") or f"由关键词 {keyword} 检索到的 Web UI Prompt 资源。",
+        "local_note_path": None,
+        "content_hash": content_hash(combined_content or readme or item.get("description") or repo_url),
+        "has_preview_images": 1 if preview_images else 0,
+        "has_prompt_effect_pairs": 0,
+        "prompt_effect_pair_count": 0,
+        "duplicate_of": None,
+        "similar_to": None,
+        "last_checked_at": now,
+        "last_updated_at": item.get("pushed_at"),
+        "created_at": now,
+        "notes": (
+            f"Web UI 专用扫描：关键词 {keyword}；扫描文件 {len(scanned_files)}；"
+            f"Web UI 资产候选 {len(web_ui_assets)}；截图候选 {len(preview_images)}。"
+        ),
+        "_preview_images": preview_images,
+        "_prompt_candidates": extracted["prompt_candidates"],
+        "_pair_candidates": [],
+        "_web_ui_assets": web_ui_assets,
+        "_web_ui_repo_profile": profile,
+        "_scanned_files": scanned_files,
+    }
+
+
+async def _skill_repo_record(
+    item: Dict[str, Any],
+    keyword: str,
+    category: str,
+    readme: str,
+    documents: list[Dict[str, str]],
+    ai_config_id: Optional[int] = None,
+    progress_callback=None,
+) -> Dict[str, Any]:
+    owner = item.get("owner", {}).get("login") or ""
+    repo_name = item.get("name") or ""
+    repo_url = item.get("html_url") or f"https://github.com/{owner}/{repo_name}"
+    canonical_url = normalize_github_url(repo_url) or repo_url
+    now = utc_now()
+    profile = await build_skill_repo_profile(
+        repo_name=repo_name,
+        repo_url=repo_url,
+        readme=readme,
+        documents=documents,
+        ai_config_id=ai_config_id,
+        progress_callback=progress_callback,
+    )
+    scanned_files = [document["path"] for document in documents]
+    combined_content = "\n".join(document["content"] for document in documents)
+    return {
+        "repo_name": repo_name,
+        "owner": owner,
+        "repo_url": repo_url,
+        "canonical_url": canonical_url,
+        "stars": int(item.get("stargazers_count") or 0),
+        "forks": int(item.get("forks_count") or 0),
+        "license": _license_from_item_or_readme(item, readme),
+        "is_fork": 1 if item.get("fork") else 0,
+        "parent_repo": None,
+        "resource_type": "github_repo",
+        "category": category,
+        "quality_level": "pending_review",
+        "status": "pending_review",
+        "summary": item.get("description") or f"由关键词 {keyword} 检索到的 Skill 仓库资源。",
+        "local_note_path": None,
+        "content_hash": content_hash(combined_content or readme or item.get("description") or repo_url),
+        "has_preview_images": 0,
+        "has_prompt_effect_pairs": 0,
+        "prompt_effect_pair_count": 0,
+        "duplicate_of": None,
+        "similar_to": None,
+        "last_checked_at": now,
+        "last_updated_at": item.get("pushed_at"),
+        "created_at": now,
+        "notes": f"Skill 仓库级扫描：关键词 {keyword}；扫描文件 {len(scanned_files)}；生成仓库画像 1 条。",
+        "_preview_images": [],
+        "_prompt_candidates": [profile.summary_cn],
+        "_pair_candidates": [],
+        "_skill_repo_profile": profile,
+        "_scanned_files": scanned_files,
+    }
+
+
 def _select_template_documents(documents: list[Dict[str, str]], template_content: Optional[Dict[str, Any]]) -> tuple[list[Dict[str, str]], int, int]:
     if not template_content:
         return documents, 0, 0
@@ -355,6 +483,153 @@ async def scan_repo_by_id(repo_id: int, options: Optional[Dict[str, Any]] = None
         return result
 
     category = repo_dict.get("category") or infer_category(full_name)
+    if category == "web_ui_prompt":
+        _update_scan_run(run_id, total_files=len(documents), current_file="Web UI 专用规则扫描", progress_percent=5)
+        record = await _web_ui_repo_record(
+            item,
+            "manual_web_ui_repo_scan",
+            category,
+            readme,
+            documents,
+            ai_config_id=options.get("ai_config_id"),
+            progress_callback=progress,
+        )
+        now = utc_now()
+        with get_connection() as conn:
+            _check_scan_cancel(run_id)
+            action, effective_repo_id = _insert_or_update_repo(conn, record)
+            tx_progress = _transaction_progress_callback(run_id, conn)
+            tx_progress({"progress_percent": 72, "current_file": "保存 Web UI Prompt 资产"})
+            profile = record.get("_web_ui_repo_profile")
+            web_ui_stats = await save_web_ui_repo_profile(
+                conn,
+                effective_repo_id,
+                record["repo_name"],
+                record["repo_url"],
+                profile,
+                progress_callback=tx_progress,
+            )
+            pair_count = conn.execute("SELECT COUNT(*) FROM prompt_effect_pairs WHERE repo_id = ?", (effective_repo_id,)).fetchone()[0]
+            conn.execute(
+                """
+                UPDATE repos
+                SET has_prompt_effect_pairs = CASE WHEN ? > 0 THEN 1 ELSE 0 END,
+                    prompt_effect_pair_count = ?,
+                    last_checked_at = ?,
+                    notes = COALESCE(notes, '') || char(10) || ?
+                WHERE id = ?
+                """,
+                (
+                    pair_count,
+                    pair_count,
+                    now,
+                    (
+                        f"Web UI 专用扫描：文件 {len(record.get('_scanned_files') or [])} 个，"
+                        f"画像类型 {web_ui_stats['profile_type']}，"
+                        f"{'新增' if web_ui_stats['action'] == 'added' else '更新'} 1 条仓库画像，"
+                        f"新增截图 {web_ui_stats['screenshots_added']} 张。时间：{now}"
+                    ),
+                    effective_repo_id,
+                ),
+            )
+        result = {
+            "status": "ok",
+            "repo_id": effective_repo_id,
+            "repo": full_name,
+            "action": action,
+            "scanned_files": len(record.get("_scanned_files") or []),
+            "prompt_candidates": len(record.get("_prompt_candidates") or []),
+            "pair_candidates": 0,
+            "prompt_pairs_added": 0,
+            "pair_candidates_added": 0,
+            "images_added": web_ui_stats["screenshots_added"],
+            "has_strict_pairs": False,
+            "use_ai": 1 if profile and profile.source_ai_config_id else 0,
+            "scan_mode": "web_ui_rules",
+            "web_ui_profile_type": web_ui_stats["profile_type"],
+            "web_ui_profiles_added": 1 if web_ui_stats["action"] == "added" else 0,
+            "web_ui_profiles_updated": 1 if web_ui_stats["action"] == "updated" else 0,
+            "web_ui_screenshots_added": web_ui_stats["screenshots_added"],
+            "summary": (
+                f"Web UI 扫描完成：文件 {len(record.get('_scanned_files') or [])} 个，"
+                f"画像类型 {web_ui_stats['profile_type']}，"
+                f"{'新增' if web_ui_stats['action'] == 'added' else '更新'} 1 条仓库画像，"
+                f"新增截图 {web_ui_stats['screenshots_added']} 张。"
+            ),
+        }
+        _record_scan_run(effective_repo_id, result, options)
+        return result
+
+    if category == "skill_repository":
+        _update_scan_run(run_id, total_files=len(documents), current_file="Skill 仓库级标注", progress_percent=5)
+        record = await _skill_repo_record(
+            item,
+            "manual_skill_repo_scan",
+            category,
+            readme,
+            documents,
+            ai_config_id=options.get("ai_config_id"),
+            progress_callback=progress,
+        )
+        now = utc_now()
+        with get_connection() as conn:
+            _check_scan_cancel(run_id)
+            action, effective_repo_id = _insert_or_update_repo(conn, record)
+            tx_progress = _transaction_progress_callback(run_id, conn)
+            tx_progress({"progress_percent": 72, "current_file": "保存 Skill 仓库画像"})
+            profile = record.get("_skill_repo_profile")
+            skill_stats = await save_skill_repo_profile(
+                conn,
+                effective_repo_id,
+                record["repo_name"],
+                record["repo_url"],
+                profile,
+            )
+            conn.execute(
+                """
+                UPDATE repos
+                SET has_prompt_effect_pairs = 0,
+                    prompt_effect_pair_count = 0,
+                    last_checked_at = ?,
+                    notes = COALESCE(notes, '') || char(10) || ?
+                WHERE id = ?
+                """,
+                (
+                    now,
+                    (
+                        f"Skill 仓库级扫描：文件 {len(record.get('_scanned_files') or [])} 个，"
+                        f"Skill 类型 {skill_stats['skill_type']}，"
+                        f"{'新增' if skill_stats['action'] == 'added' else '更新'} 1 条仓库画像。时间：{now}"
+                    ),
+                    effective_repo_id,
+                ),
+            )
+        result = {
+            "status": "ok",
+            "repo_id": effective_repo_id,
+            "repo": full_name,
+            "action": action,
+            "scanned_files": len(record.get("_scanned_files") or []),
+            "prompt_candidates": 0,
+            "pair_candidates": 0,
+            "prompt_pairs_added": 0,
+            "pair_candidates_added": 0,
+            "images_added": 0,
+            "has_strict_pairs": False,
+            "use_ai": 1 if profile and profile.source_ai_config_id else 0,
+            "scan_mode": "skill_repo_profile",
+            "skill_type": skill_stats["skill_type"],
+            "skill_profiles_added": 1 if skill_stats["action"] == "added" else 0,
+            "skill_profiles_updated": 1 if skill_stats["action"] == "updated" else 0,
+            "summary": (
+                f"Skill 仓库扫描完成：文件 {len(record.get('_scanned_files') or [])} 个，"
+                f"Skill 类型 {skill_stats['skill_type']}，"
+                f"{'新增' if skill_stats['action'] == 'added' else '更新'} 1 条仓库画像。"
+            ),
+        }
+        _record_scan_run(effective_repo_id, result, options)
+        return result
+
     selected_template: Optional[Dict[str, Any]] = None
     generated_template: Optional[Dict[str, Any]] = None
     template_content: Optional[Dict[str, Any]] = None

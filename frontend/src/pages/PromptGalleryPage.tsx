@@ -3,26 +3,43 @@ import type { PromptPair, PromptPairPatch } from "../lib/types";
 import { FilterBar } from "../components/filters/FilterBar";
 import { PaginationBar } from "../components/navigation/PaginationBar";
 import { CandidateAssetGrid } from "../components/prompts/CandidateAssetGrid";
+import { ImageGenerationAssetBoard } from "../components/prompts/ImageGenerationAssetBoard";
 import { PromptMasonryGrid } from "../components/prompts/PromptMasonryGrid";
 import { PromptDetailDrawer } from "../components/prompts/PromptDetailDrawer";
+import { VideoGenerationAssetBoard } from "../components/prompts/VideoGenerationAssetBoard";
 import { Card, CardContent } from "../components/ui/card";
 import { useAssets } from "../hooks/useAssets";
 import { usePromptPairs, useUpdatePromptPair } from "../hooks/usePromptPairs";
 import { useFilterStore } from "../stores/useFilterStore";
 
-export function PromptGalleryPage({ pendingOnly = false }: { pendingOnly?: boolean }) {
+type PromptGalleryPageProps = {
+  pendingOnly?: boolean;
+  fixedCategory?: string;
+  title?: string;
+  eyebrow?: string;
+  description?: string;
+};
+
+export function PromptGalleryPage({
+  pendingOnly = false,
+  fixedCategory,
+  title,
+  eyebrow,
+  description
+}: PromptGalleryPageProps) {
   const [selected, setSelected] = useState<PromptPair | null>(null);
   const [page, setPage] = useState(1);
   const [assetPage, setAssetPage] = useState(1);
   const pageSize = pendingOnly ? 60 : 80;
   const assetPageSize = 24;
   const { globalSearch, category, qualityLevel, selectionStatus } = useFilterStore();
+  const activeCategory = fixedCategory || category;
   const updateMutation = useUpdatePromptPair();
   const { data, isLoading } = usePromptPairs({
     page,
     page_size: pageSize,
     search: globalSearch,
-    category,
+    category: activeCategory,
     quality_level: qualityLevel,
     selection_status: pendingOnly ? "pending_review" : selectionStatus,
     has_image: true
@@ -31,14 +48,14 @@ export function PromptGalleryPage({ pendingOnly = false }: { pendingOnly?: boole
     page: assetPage,
     page_size: assetPageSize,
     search: globalSearch,
-    category
+    category: activeCategory
   });
   const pairs = data?.items || [];
   const candidateAssets = assetData?.items || [];
   useEffect(() => {
     setPage(1);
     setAssetPage(1);
-  }, [globalSearch, category, qualityLevel, selectionStatus, pendingOnly]);
+  }, [globalSearch, activeCategory, qualityLevel, selectionStatus, pendingOnly]);
 
   const update = (payload: PromptPairPatch) => {
     if (!selected) return;
@@ -47,13 +64,22 @@ export function PromptGalleryPage({ pendingOnly = false }: { pendingOnly?: boole
   };
   const quickStatus = (id: number, status: string) => updateMutation.mutate({ id, payload: { selection_status: status } });
 
+  if (!pendingOnly && activeCategory === "image_generation_prompt") {
+    return <ImageGenerationAssetBoard title={title} eyebrow={eyebrow} description={description} />;
+  }
+
+  if (!pendingOnly && activeCategory === "video_generation_prompt") {
+    return <VideoGenerationAssetBoard title={title} eyebrow={eyebrow} description={description} />;
+  }
+
   return (
     <div>
       <div className="mb-5">
-        <div className="text-xs text-muted-foreground">{pendingOnly ? "Review Queue" : "Prompt Effect Pairs"}</div>
-        <h1 className="text-2xl font-semibold">{pendingOnly ? "待复查" : "Prompt 效果图瀑布流"}</h1>
+        <div className="text-xs text-muted-foreground">{eyebrow || (pendingOnly ? "Review Queue" : "Prompt Asset Library")}</div>
+        <h1 className="text-2xl font-semibold">{title || (pendingOnly ? "待复查" : "Prompt 效果图瀑布流")}</h1>
+        {description && <p className="mt-2 max-w-3xl text-sm text-muted-foreground">{description}</p>}
       </div>
-      {!pendingOnly && <FilterBar />}
+      {!pendingOnly && <FilterBar showCategory={!fixedCategory} />}
       {isLoading ? (
         <Card>
           <CardContent className="p-10 text-muted-foreground">加载 Prompt 效果图中...</CardContent>
