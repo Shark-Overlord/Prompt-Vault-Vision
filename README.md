@@ -1,72 +1,119 @@
-# Visual Prompt Library
+# Prompt Vault Vision
 
-本地视觉 Prompt 资产管理器。系统以 SQLite 为主索引，保存 GitHub 资源、Prompt 与效果图对应关系、来源页面、效果评价、筛选结论、标签和导出数据。
+本地视觉 Prompt 资产管理器，用于持续沉淀 GitHub 上的视觉 Prompt、效果图、Web UI 组件仓库、Skill 仓库和相关证据链。
 
-## 当前能力
+系统以 SQLite 作为主索引，图片和导出文件保存在本地目录中，前端通过 API 访问数据，不直接读取数据库文件。
 
-- FastAPI 后端，前后端完全分离。
-- SQLite 数据库：`data/visual_prompt_library.db`。
-- GitHub 增量搜索：先读 `search_state`，按 `created:>=` 和 `pushed:>=` 搜索；完整成功后才推进搜索时间。
-- 去重：GitHub URL 归一化、canonical_url 唯一约束、Fork 跳过、图片 hash 去重。
-- 图片资产：保存到 `assets/images`，缩略图保存到 `assets/thumbnails`。
-- React + TypeScript + Tailwind UI：Dashboard、资源库、Prompt 瀑布流、待复查、搜索、导出。
-- 导出：Markdown、JSON、CSV、桌面 AI Skill 数据。
+## 核心能力
 
-## 运行
+- GitHub 增量发现：按分类搜索图像生成、视频生成、Web UI、Skill 相关仓库。
+- 仓库去重：URL 归一化、Fork 处理、相似内容判断、图片 hash 去重。
+- Prompt 资产库：保存 Prompt、效果图、来源页面、匹配证据、筛选状态、翻译和标签。
+- Web UI 资产库：收藏和检索前端组件库、设计规范仓库，并按画像得分排序。
+- Skill 资产库：收藏和检索 AI Skill、Agent 工具、MCP 服务，并标注具体使用场景。
+- 后台任务：支持定时搜索、仓库扫描任务、标注任务和运行记录。
+- 本地 UI：React + TypeScript + Tailwind，提供瀑布流、抽屉详情、筛选、收藏和导出。
 
-后端使用你的 `xh` 环境：
+## 技术栈
+
+- Backend：Python、FastAPI、SQLite
+- Frontend：React、TypeScript、Vite、Tailwind CSS
+- Data：SQLite、Markdown/JSON/CSV 导出、本地图片资产
+
+## 目录结构
+
+```text
+backend/      FastAPI 后端、路由、服务、扫描和标注逻辑
+frontend/     React 前端界面
+data/         SQLite 数据库目录，本地运行时生成
+assets/       图片、缩略图和来源页面缓存
+exports/      Markdown、JSON、CSV 等导出文件
+notes/        辅助说明和资源卡片
+tests/        后端单元测试与集成测试
+```
+
+## 本地运行
+
+后端：
 
 ```powershell
-cd I:\小工具\visual_prompt_library\backend
-D:\anaconda3\envs\xh\python.exe -m uvicorn app:app --host 127.0.0.1 --port 8000
+cd backend
+python -m uvicorn app:app --host 127.0.0.1 --port 8001
 ```
 
 前端：
 
 ```powershell
-cd I:\小工具\visual_prompt_library\frontend
-npm run dev -- --port 5173
+cd frontend
+npm install
+npm run dev
 ```
 
-访问：
+默认访问：
 
 ```text
-http://127.0.0.1:5173
+http://127.0.0.1:5174
 ```
 
-## GitHub Token
-
-推荐在 UI 里点击「连接 GitHub」，使用 GitHub OAuth Device Flow 授权。第一次使用需要一个 GitHub OAuth App Client ID：
-
-1. 打开 GitHub Developer settings，创建 OAuth App。
-2. 启用 Device Flow。
-3. 把 Client ID 填入本地 UI 的「连接 GitHub」弹窗。
-4. 点击「连接 GitHub」，在浏览器中完成授权。
-5. 后端会把 access token 保存到 `backend/.auth/github_token.json`，该目录已加入 `.gitignore`。
-
-也可以复制 `backend/.env.example` 为 `backend/.env`，手动填写：
+如需修改前端 API 地址，可在 `frontend/.env` 中配置：
 
 ```env
-GITHUB_TOKEN=你的 GitHub Token
+VITE_API_BASE_URL=http://127.0.0.1:8001
 ```
 
-没有授权或 token 时，`POST /api/search/github` 会返回 `needs_token`，不会推进 `search_state`。
+## GitHub 授权
+
+推荐在 UI 中使用「连接 GitHub」完成授权。授权成功后，Token 会保存在本地认证目录中，该目录不会提交到 Git。
+
+也可以在后端环境变量中手动配置：
+
+```env
+GITHUB_TOKEN=your_github_token
+```
+
+未配置 Token 时，GitHub 搜索任务会失败并写入日志，不会推进增量搜索时间。
+
+## 本地数据说明
+
+以下内容属于本地运行数据，不会提交到仓库：
+
+- `data/*.db`
+- `assets/images/*`
+- `assets/thumbnails/*`
+- `assets/source_pages/*`
+- `exports/*`
+- `backend/.auth/*`
+- `.env`
+
+仓库中只保留源码、测试和必要的 `.gitkeep` 文件。
 
 ## 验证
 
-```powershell
-cd I:\小工具\visual_prompt_library
-D:\anaconda3\python.exe -m pytest -q
+后端：
 
-cd I:\小工具\visual_prompt_library\frontend
+```powershell
+python -m compileall backend
+python -m pytest -q
+```
+
+前端：
+
+```powershell
+cd frontend
 npm run build
 ```
 
-## 目录约定
+## 定位
 
-- `backend/routes`：API 路由，只做参数接收和服务调用。
-- `backend/services`：GitHub 搜索、去重、Prompt 处理、导出。
-- `backend/utils`：图片下载、hash、缩略图。
-- `frontend/src/components`：可复用 UI 组件。
-- `frontend/src/pages`：页面级布局。
-- `exports`：日报、精选库和结构化导出。
+Prompt Vault Vision 不是普通收藏夹，而是一个长期可维护的本地视觉 Prompt 资产系统。它关注的是：
+
+```text
+Prompt
++ 效果图
++ 来源页面
++ 匹配证据
++ 翻译标签
++ 收藏筛选
++ SQLite 索引
++ 本地 UI 检索
+```
