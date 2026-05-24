@@ -25,6 +25,10 @@ def _featured_pairs(selection_status: str = "featured", category: Optional[str] 
     return fetch_all(sql, tuple(params))
 
 
+def _asset_path(row: Dict) -> str:
+    return row.get("cloud_storage_url") or row.get("image_local_path") or ""
+
+
 def export_markdown(selection_status: str = "featured", category: Optional[str] = None) -> Path:
     EXPORT_DIR.mkdir(parents=True, exist_ok=True)
     rows = _featured_pairs(selection_status, category)
@@ -39,7 +43,7 @@ def export_markdown(selection_status: str = "featured", category: Optional[str] 
                 f"- 分类：{row.get('category') or ''}",
                 f"- 场景：{row.get('scenario') or ''}",
                 f"- 推荐等级：{row.get('quality_level') or ''}",
-                f"- 效果图：{row.get('image_local_path') or ''}",
+                f"- 效果图：{_asset_path(row)}",
                 "",
                 "### Prompt",
                 "",
@@ -72,7 +76,8 @@ def export_json(selection_status: str = "featured", category: Optional[str] = No
             "category": row.get("category") or "",
             "scenario": row.get("scenario") or "",
             "prompt": row.get("original_prompt") or "",
-            "image_path": row.get("image_local_path") or "",
+            "image_path": _asset_path(row),
+            "cloud_storage_url": row.get("cloud_storage_url") or "",
             "effect_review": row.get("effect_review") or "",
             "selection_status": row.get("selection_status") or "",
             "source_url": row.get("source_page_url") or row.get("repo_url") or "",
@@ -98,7 +103,7 @@ def export_skill(selection_status: str = "featured", category: Optional[str] = N
                 "scenario": row.get("scenario") or "",
                 "prompt": row.get("original_prompt") or "",
                 "usage_note": row.get("reusable_value") or row.get("prompt_cn_explanation") or "",
-                "example_image": row.get("image_local_path") or "",
+                "example_image": _asset_path(row),
             }
             for row in rows
         ],
@@ -112,7 +117,7 @@ def export_csv(selection_status: str = "featured", category: Optional[str] = Non
     EXPORT_DIR.mkdir(parents=True, exist_ok=True)
     rows = _featured_pairs(selection_status, category)
     path = EXPORT_DIR / "featured_prompts.csv"
-    fields = ["repo_name", "category", "scenario", "quality_level", "selection_status", "original_prompt", "image_local_path", "source_page_url", "license", "commercial_risk"]
+    fields = ["repo_name", "category", "scenario", "quality_level", "selection_status", "original_prompt", "image_local_path", "cloud_storage_url", "source_page_url", "license", "commercial_risk"]
     with path.open("w", encoding="utf-8-sig", newline="") as fp:
         writer = csv.DictWriter(fp, fieldnames=fields)
         writer.writeheader()
@@ -134,4 +139,3 @@ def run_export(fmt: str, selection_status: str = "featured", category: Optional[
     else:
         raise ValueError(f"不支持的导出格式：{fmt}")
     return {"path": str(path.relative_to(PROJECT_ROOT)).replace("\\", "/"), "format": fmt}
-

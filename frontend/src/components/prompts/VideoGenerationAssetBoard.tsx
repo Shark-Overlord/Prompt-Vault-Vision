@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Copy, ExternalLink, Film, ImageOff, Languages, Search, Star, Tags, X } from "lucide-react";
 import type { PromptPair, PromptPairPatch } from "../../lib/types";
 import { assetUrl, cn, truncate } from "../../lib/utils";
+import { effectiveCnExplanation, hasEffectiveAnnotation } from "../../lib/annotation";
 import { usePromptPairs, useUpdatePromptPair } from "../../hooks/usePromptPairs";
 import { PaginationBar } from "../navigation/PaginationBar";
 import { Badge } from "../ui/badge";
@@ -15,12 +16,12 @@ function isAnnotated(pair: PromptPair) {
   return (
     pair.annotation_display_status === "formal" ||
     pair.annotation_display_status === "draft" ||
-    (Boolean(pair.prompt_cn_explanation?.trim()) && Boolean((pair.tag_count || pair.tags?.length || 0) > 0))
+    hasEffectiveAnnotation(pair)
   );
 }
 
 function displayTranslation(pair: PromptPair) {
-  return pair.prompt_cn_explanation?.trim() || pair.latest_suggested_cn_explanation?.trim() || pair.original_prompt;
+  return effectiveCnExplanation(pair) || pair.original_prompt;
 }
 
 function displayTags(pair: PromptPair) {
@@ -36,7 +37,7 @@ function VideoAssetCard({
   onOpen: (pair: PromptPair) => void;
   onToggleFavorite: (pair: PromptPair) => void;
 }) {
-  const image = assetUrl(pair.image_local_path);
+  const image = assetUrl(pair.cloud_storage_url || pair.image_local_path);
   const annotated = isAnnotated(pair);
   const draft = pair.annotation_display_status === "draft";
   const favorite = pair.selection_status === "featured";

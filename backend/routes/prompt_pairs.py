@@ -12,6 +12,17 @@ from models.schemas import PromptPairBatchUpdate, PromptPairPatch
 router = APIRouter(prefix="/api/prompt-pairs", tags=["prompt-pairs"])
 
 
+STALE_TRANSLATION_MARKERS = [
+    "该 Prompt 适合",
+    "该 prompt 适合",
+    "重点参考其主体描述",
+    "原文需结合来源 License",
+    "原文需要结合来源 License",
+    "适合用于图像生成场景",
+    "适合用于视频生成场景",
+]
+
+
 LATEST_PENDING_SUGGESTION_SELECT = """
     (SELECT s.id
      FROM prompt_pair_annotation_suggestions s
@@ -63,10 +74,28 @@ def _parse_suggested_tags(value: Optional[str]) -> List[dict]:
     return tags
 
 
+def _looks_like_stale_translation(value: Optional[str]) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    return any(marker in text for marker in STALE_TRANSLATION_MARKERS)
+
+
+def _has_valid_translation(value: Optional[str]) -> bool:
+    text = str(value or "").strip()
+    return bool(text and not _looks_like_stale_translation(text))
+
+
+def _valid_translation_sql(column: str = "prompt_cn_explanation") -> str:
+    escaped_markers = [marker.replace("'", "''") for marker in STALE_TRANSLATION_MARKERS]
+    stale_checks = " OR ".join(f"{column} LIKE '%{marker}%'" for marker in escaped_markers)
+    return f"(TRIM(COALESCE({column}, '')) != '' AND NOT ({stale_checks}))"
+
+
 def _has_latest_draft(pair: dict) -> bool:
     draft_text = str(pair.get("latest_suggested_cn_explanation") or "").strip()
     draft_tags = _parse_suggested_tags(pair.get("latest_suggested_tags_json"))
-    return bool(pair.get("latest_annotation_suggestion_id") and draft_text and draft_tags)
+    return bool(pair.get("latest_annotation_suggestion_id") and draft_text and not _looks_like_stale_translation(draft_text) and draft_tags)
 
 
 def _attach_tags(pair: dict) -> dict:
@@ -83,7 +112,7 @@ def _attach_tags(pair: dict) -> dict:
     pair["tags"] = tags
     pair["tag_count"] = len(tags)
     pair["latest_suggested_tags"] = _parse_suggested_tags(pair.get("latest_suggested_tags_json"))
-    pair["annotation_display_status"] = "formal" if tags and str(pair.get("prompt_cn_explanation") or "").strip() else "draft" if _has_latest_draft(pair) else "none"
+    pair["annotation_display_status"] = "formal" if tags and _has_valid_translation(pair.get("prompt_cn_explanation")) else "draft" if _has_latest_draft(pair) else "none"
     return pair
 
 
@@ -117,7 +146,7 @@ def _attach_tags_to_items(items: List[dict]) -> List[dict]:
         item["tags"] = tags
         item["tag_count"] = len(tags)
         item["latest_suggested_tags"] = _parse_suggested_tags(item.get("latest_suggested_tags_json"))
-        item["annotation_display_status"] = "formal" if tags and str(item.get("prompt_cn_explanation") or "").strip() else "draft" if _has_latest_draft(item) else "none"
+        item["annotation_display_status"] = "formal" if tags and _has_valid_translation(item.get("prompt_cn_explanation")) else "draft" if _has_latest_draft(item) else "none"
     return items
 
 
@@ -209,15 +238,16 @@ def list_prompt_pairs(
             """
         )
         params.extend([f"%{tag_search}%", f"%{tag_search}%"])
-    translation_clause = "TRIM(COALESCE(prompt_cn_explanation, '')) != ''"
+    translation_clause = _valid_translation_sql("prompt_cn_explanation")
     tags_clause = "EXISTS (SELECT 1 FROM pair_tags WHERE pair_tags.pair_id = prompt_effect_pairs.id)"
-    draft_annotation_clause = """
+    draft_translation_clause = _valid_translation_sql("s.suggested_cn_explanation")
+    draft_annotation_clause = f"""
         EXISTS (
             SELECT 1
             FROM prompt_pair_annotation_suggestions s
             WHERE s.pair_id = prompt_effect_pairs.id
             AND s.status = 'pending_review'
-            AND TRIM(COALESCE(s.suggested_cn_explanation, '')) != ''
+            AND {draft_translation_clause}
             AND TRIM(COALESCE(s.suggested_tags_json, '')) NOT IN ('', '[]')
         )
     """
@@ -329,6 +359,7 @@ def update_prompt_pair(pair_id: int, patch: PromptPairPatch):
         "visual_asset_type",
         "visual_asset_type_confidence",
         "visual_asset_type_reason",
+        "cloud_storage_url",
     ]
     data = patch.model_dump(exclude_unset=True)
     for field in allowed:
@@ -342,6 +373,11 @@ def update_prompt_pair(pair_id: int, patch: PromptPairPatch):
     params.append(utc_now())
     with get_connection() as conn:
         conn.execute(f"UPDATE prompt_effect_pairs SET {', '.join(updates)} WHERE id = ?", (*params, pair_id))
+        if "cloud_storage_url" in data and existing.get("image_hash"):
+            conn.execute(
+                "UPDATE assets SET cloud_storage_url = ?, cloud_uploaded_at = ? WHERE image_hash = ?",
+                (data["cloud_storage_url"], utc_now() if data["cloud_storage_url"] else None, existing["image_hash"]),
+            )
         if patch.tags is not None:
             conn.execute("DELETE FROM pair_tags WHERE pair_id = ?", (pair_id,))
             for name in patch.tags:

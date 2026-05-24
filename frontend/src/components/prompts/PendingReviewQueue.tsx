@@ -19,7 +19,7 @@ export function PendingReviewQueue({ pairs, onOpen, onDecision }: { pairs: Promp
           <div key={pair.id} className="rounded-xl border bg-muted/30 p-3">
             <button onClick={() => onOpen(pair)} className="flex w-full gap-3 text-left">
               <div className="h-20 w-24 shrink-0 overflow-hidden rounded-lg bg-muted">
-                {pair.image_local_path && <img src={assetUrl(pair.image_local_path)} className="h-full w-full object-cover" />}
+                {(pair.cloud_storage_url || pair.image_local_path) && <img src={assetUrl(pair.cloud_storage_url || pair.image_local_path)} className="h-full w-full object-cover" />}
               </div>
               <div className="min-w-0">
                 <div className="text-sm font-medium">{pair.repo_name || "未命名"}</div>

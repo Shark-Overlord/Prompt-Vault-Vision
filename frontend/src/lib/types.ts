@@ -190,6 +190,7 @@ export type PromptPair = {
   prompt_cn_explanation: string;
   image_original_url: string;
   image_local_path: string;
+  cloud_storage_url?: string | null;
   image_hash: string;
   task_type: string;
   category: string;
@@ -228,7 +229,9 @@ export type VisualAsset = {
   repo_id: number;
   image_original_url: string;
   image_local_path: string;
+  cloud_storage_url?: string | null;
   thumbnail_local_path?: string | null;
+  thumbnail_cloud_storage_url?: string | null;
   image_hash: string;
   source_page_url?: string | null;
   asset_type: string;
@@ -236,12 +239,57 @@ export type VisualAsset = {
   height?: number | null;
   file_size?: number | null;
   description?: string | null;
+  cloud_storage_provider?: string | null;
+  cloud_storage_bucket?: string | null;
+  cloud_storage_region?: string | null;
+  cloud_storage_key?: string | null;
+  cloud_uploaded_at?: string | null;
   commercial_risk?: string | null;
   created_at: string;
   repo_name?: string | null;
   repo_url?: string | null;
   repo_category?: string | null;
   repo_status?: string | null;
+};
+
+export type CloudStorageStatus = {
+  configured: boolean;
+  message?: string;
+  provider?: string;
+  host?: string;
+  region?: string;
+  bucket?: string;
+  key_prefix?: string;
+  secret_id_set?: boolean;
+  secret_key_set?: boolean;
+};
+
+export type CloudUploadRun = {
+  id: number;
+  status: "queued" | "running" | "succeeded" | "failed" | "cancel_requested" | "canceled" | string;
+  total_assets: number;
+  processed_assets: number;
+  uploaded_assets: number;
+  skipped_assets: number;
+  failed_assets: number;
+  current_asset_id?: number | null;
+  current_file?: string | null;
+  options_json?: string | null;
+  result_json?: string | null;
+  error?: string | null;
+  cancel_requested?: number;
+  created_at?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type CloudUploadRequest = {
+  asset_ids?: number[] | null;
+  only_missing?: boolean;
+  include_thumbnails?: boolean;
+  asset_type?: string | null;
+  limit?: number | null;
 };
 
 export type PromptPairPatch = Omit<Partial<PromptPair>, "tags"> & {
@@ -286,6 +334,7 @@ export type WebUiPrompt = {
   ui_pattern?: string | null;
   screenshot_original_url?: string | null;
   screenshot_local_path?: string | null;
+  screenshot_cloud_storage_url?: string | null;
   screenshot_hash?: string | null;
   tags?: string[];
   quality_level?: string | null;
@@ -322,6 +371,7 @@ export type WebUiRepoProfile = {
   source_ai_config_id?: number | null;
   screenshot_original_url?: string | null;
   screenshot_local_path?: string | null;
+  screenshot_cloud_storage_url?: string | null;
   screenshot_hash?: string | null;
   quality_level?: string | null;
   selection_status?: string | null;
@@ -377,6 +427,7 @@ export type PairCandidate = {
   original_prompt: string;
   image_original_url: string;
   image_local_path: string;
+  cloud_storage_url?: string | null;
   image_hash: string;
   match_type: string;
   match_score: number;

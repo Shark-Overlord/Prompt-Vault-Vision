@@ -9,7 +9,7 @@ import { QualityBadge } from "./QualityBadge";
 import { StatusBadge } from "./StatusBadge";
 
 export function PromptCard({ pair, onOpen, onQuickStatus }: { pair: PromptPair; onOpen: (pair: PromptPair) => void; onQuickStatus: (id: number, status: string) => void }) {
-  const image = assetUrl(pair.image_local_path);
+  const image = assetUrl(pair.cloud_storage_url || pair.image_local_path);
   return (
     <motion.article
       layout

@@ -381,6 +381,7 @@ async def save_web_ui_repo_profile(
 ) -> Dict[str, Any]:
     now = utc_now()
     screenshot_local_path = ""
+    screenshot_cloud_storage_url = ""
     screenshot_hash = ""
     screenshots_added = 0
 
@@ -392,6 +393,7 @@ async def save_web_ui_repo_profile(
             asset_row = conn.execute("SELECT * FROM assets WHERE image_hash = ?", (downloaded["image_hash"],)).fetchone()
             if asset_row:
                 screenshot_local_path = asset_row["image_local_path"]
+                screenshot_cloud_storage_url = asset_row["cloud_storage_url"] or ""
                 screenshot_hash = asset_row["image_hash"]
             else:
                 conn.execute(
@@ -444,6 +446,7 @@ async def save_web_ui_repo_profile(
         "source_ai_config_id": profile.source_ai_config_id,
         "screenshot_original_url": profile.screenshot_original_url,
         "screenshot_local_path": screenshot_local_path,
+        "screenshot_cloud_storage_url": screenshot_cloud_storage_url,
         "screenshot_hash": screenshot_hash,
         "last_scanned_at": now,
         "updated_at": now,
@@ -463,9 +466,9 @@ async def save_web_ui_repo_profile(
         INSERT INTO web_ui_repo_profiles
             (repo_id, repo_name, repo_url, profile_type, library_kind, ui_stack, supported_frontend_types_json,
              component_focus_json, style_keywords_json, reuse_mode, summary_cn, ai_summary_cn, evidence, ai_reason_cn,
-             confidence, source_ai_config_id, screenshot_original_url, screenshot_local_path, screenshot_hash,
+             confidence, source_ai_config_id, screenshot_original_url, screenshot_local_path, screenshot_cloud_storage_url, screenshot_hash,
              quality_level, selection_status, commercial_risk, last_scanned_at, created_at, updated_at, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             repo_id,
@@ -486,6 +489,7 @@ async def save_web_ui_repo_profile(
             profile.source_ai_config_id,
             profile.screenshot_original_url,
             screenshot_local_path,
+            screenshot_cloud_storage_url,
             screenshot_hash,
             "pending_review",
             "pending_review",

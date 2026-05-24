@@ -418,12 +418,14 @@ async def _save_pairs_and_images(conn, repo_id: int, record: Dict[str, Any], pro
             image_local_path = asset_existing["image_local_path"]
             thumbnail_local_path = asset_existing["thumbnail_local_path"]
             image_hash = asset_existing["image_hash"]
+            cloud_storage_url = asset_existing["cloud_storage_url"]
         else:
             if not asset:
                 continue
             image_local_path = asset["image_local_path"]
             thumbnail_local_path = asset["thumbnail_local_path"]
             image_hash = asset["image_hash"]
+            cloud_storage_url = None
             conn.execute(
                 """
                 INSERT OR IGNORE INTO assets
@@ -467,11 +469,11 @@ async def _save_pairs_and_images(conn, repo_id: int, record: Dict[str, Any], pro
             """
             INSERT INTO prompt_effect_pairs
                 (repo_id, repo_name, repo_url, source_page_url, original_prompt, prompt_cn_explanation,
-                 image_original_url, image_local_path, image_hash, task_type, category, scenario, visual_style,
+                 image_original_url, image_local_path, cloud_storage_url, image_hash, task_type, category, scenario, visual_style,
                  quality_level, selection_status, effect_review, reusable_value, license, commercial_risk,
                  pair_relation_type, pair_evidence, pair_confidence, generated_by,
                  local_note_path, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 repo_id,
@@ -482,6 +484,7 @@ async def _save_pairs_and_images(conn, repo_id: int, record: Dict[str, Any], pro
                 build_cn_explanation(candidate.prompt, category),
                 candidate.image_url,
                 image_local_path,
+                cloud_storage_url,
                 image_hash,
                 category,
                 category,

@@ -88,8 +88,8 @@ export function PairCandidatesPage() {
               </CardHeader>
               <CardContent className="grid gap-4 md:grid-cols-[260px_1fr]">
                 <div className="overflow-hidden rounded-lg border bg-muted">
-                  {candidate.image_local_path ? (
-                    <img src={assetUrl(candidate.image_local_path)} alt={candidate.repo_name} className="h-64 w-full object-cover" loading="lazy" />
+                  {candidate.cloud_storage_url || candidate.image_local_path ? (
+                    <img src={assetUrl(candidate.cloud_storage_url || candidate.image_local_path)} alt={candidate.repo_name} className="h-64 w-full object-cover" loading="lazy" />
                   ) : (
                     <div className="grid h-64 place-items-center text-sm text-muted-foreground">无本地图片</div>
                   )}

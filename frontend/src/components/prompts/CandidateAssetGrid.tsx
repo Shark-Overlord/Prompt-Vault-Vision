@@ -27,8 +27,8 @@ export function CandidateAssetGrid({ assets, isLoading }: { assets: VisualAsset[
             {assets.map((asset) => (
               <div key={asset.id} className="overflow-hidden rounded-lg border bg-card/70">
                 <div className="aspect-[4/3] bg-muted">
-                  {asset.image_local_path ? (
-                    <img src={assetUrl(asset.image_local_path)} alt={asset.repo_name || "候选效果图"} className="h-full w-full object-cover" />
+                  {asset.cloud_storage_url || asset.image_local_path ? (
+                    <img src={assetUrl(asset.cloud_storage_url || asset.image_local_path)} alt={asset.repo_name || "候选效果图"} className="h-full w-full object-cover" />
                   ) : (
                     <div className="grid h-full place-items-center text-muted-foreground">
                       <ImageOff className="size-8" />

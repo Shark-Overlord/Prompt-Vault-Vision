@@ -110,8 +110,8 @@ export function QualitySwipeDeck({
                   className="relative z-10 w-full max-w-3xl overflow-hidden rounded-xl border bg-card shadow-2xl"
                 >
                   <div className="grid h-[360px] place-items-center bg-black/30">
-                    {current.image_local_path ? (
-                      <img src={assetUrl(current.image_local_path)} alt={current.repo_name || "prompt"} className="max-h-[340px] w-full object-contain" />
+                    {current.cloud_storage_url || current.image_local_path ? (
+                      <img src={assetUrl(current.cloud_storage_url || current.image_local_path)} alt={current.repo_name || "prompt"} className="max-h-[340px] w-full object-contain" />
                     ) : (
                       <div className="text-sm text-muted-foreground">暂无效果图</div>
                     )}

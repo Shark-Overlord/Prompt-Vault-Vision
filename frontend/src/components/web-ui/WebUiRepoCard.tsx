@@ -18,7 +18,7 @@ const libraryKindLabels: Record<string, string> = {
 };
 
 export function WebUiRepoCard({ item, onToggleFavorite }: { item: WebUiRepoProfile; onToggleFavorite: (item: WebUiRepoProfile) => void }) {
-  const image = assetUrl(item.screenshot_local_path);
+  const image = assetUrl(item.screenshot_cloud_storage_url || item.screenshot_local_path);
   const title = item.repo_name || `Web UI Repo #${item.repo_id}`;
   const summary = item.ai_summary_cn || item.summary_cn || item.evidence || "";
   const favorite = item.selection_status === "featured";

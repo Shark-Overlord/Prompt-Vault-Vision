@@ -415,7 +415,7 @@ def search_prompt_pairs(
         SELECT id, repo_id, repo_name, repo_url, source_page_url, original_prompt,
                prompt_cn_explanation, category, scenario, quality_level,
                selection_status, effect_review, reusable_value, commercial_risk,
-               image_local_path, image_original_url, pair_evidence, pair_confidence
+               image_local_path, cloud_storage_url, image_original_url, pair_evidence, pair_confidence
         FROM prompt_effect_pairs
         WHERE {' AND '.join(where)}
         ORDER BY CASE selection_status WHEN 'featured' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END, updated_at DESC
@@ -441,7 +441,7 @@ def search_pair_candidates(query: str, limit: int = 6, terms: List[str] | None =
     return fetch_all(
         f"""
         SELECT id, repo_id, repo_name, repo_url, source_page_url, source_file,
-               original_prompt, image_original_url, match_type, match_score,
+               original_prompt, image_original_url, image_local_path, cloud_storage_url, match_type, match_score,
                evidence, review_status, selection_status
         FROM pair_candidates
         WHERE {' AND '.join(where)}
@@ -490,7 +490,7 @@ def search_web_ui_prompts(query: str, limit: int = 6, terms: List[str] | None = 
         SELECT id, repo_id, repo_name, repo_url, profile_type, library_kind, ui_stack,
                supported_frontend_types_json, component_focus_json, style_keywords_json,
                reuse_mode, summary_cn, ai_summary_cn, evidence, ai_reason_cn,
-               screenshot_local_path, screenshot_original_url, quality_level, selection_status, commercial_risk
+               screenshot_local_path, screenshot_cloud_storage_url, screenshot_original_url, quality_level, selection_status, commercial_risk
         FROM web_ui_repo_profiles
         WHERE {' AND '.join(where)}
         ORDER BY CASE selection_status WHEN 'featured' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END, updated_at DESC
@@ -575,7 +575,7 @@ def build_sources(query: str, plan: Dict[str, Any] | None = None) -> List[Dict[s
                     "Web UI 仓库画像工具",
                     "/prompt-assets/web-ui",
                     row.get("repo_url"),
-                    row.get("screenshot_local_path") or row.get("screenshot_original_url"),
+                    row.get("screenshot_cloud_storage_url") or row.get("screenshot_local_path") or row.get("screenshot_original_url"),
                     row.get("ai_summary_cn") or row.get("summary_cn") or row.get("evidence"),
                     "根据你的描述匹配 Web UI 仓库级资产。",
                 )
@@ -612,7 +612,7 @@ def build_sources(query: str, plan: Dict[str, Any] | None = None) -> List[Dict[s
                     "视觉 Prompt 工具",
                     route,
                     row.get("repo_url"),
-                    row.get("image_local_path") or row.get("image_original_url"),
+                    row.get("cloud_storage_url") or row.get("image_local_path") or row.get("image_original_url"),
                     row.get("prompt_cn_explanation") or row.get("original_prompt"),
                     "根据分类、场景和关键词匹配 Prompt 效果对。",
                 )

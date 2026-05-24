@@ -1,12 +1,15 @@
 import { FormEvent, Fragment, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bot,
   CheckCircle2,
+  CloudUpload,
   KeyRound,
   Loader2,
   Pencil,
   Plus,
   RadioTower,
+  RefreshCw,
   Server,
   Settings2,
   ShieldCheck,
@@ -22,6 +25,7 @@ import {
   useUpdateAiConfig
 } from "../hooks/useAiConfigs";
 import type { AiConfig, AiConfigPayload, AiModelsResult, AiProvider } from "../lib/types";
+import { api } from "../lib/api";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
@@ -281,7 +285,22 @@ function AiConfigForm({
 }
 
 export function SystemConfigPage() {
+  const queryClient = useQueryClient();
   const { data: configs = [], isLoading } = useAiConfigs();
+  const { data: cloudStatus } = useQuery({ queryKey: ["cloud-storage-status"], queryFn: api.cloudStorageStatus });
+  const { data: cloudRuns, isLoading: cloudRunsLoading } = useQuery({
+    queryKey: ["cloud-upload-runs"],
+    queryFn: () => api.cloudUploadRuns({ page: 1, page_size: 5 }),
+    refetchInterval: 2000
+  });
+  const createCloudRun = useMutation({
+    mutationFn: api.createCloudUploadRun,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["cloud-upload-runs"] })
+  });
+  const cancelCloudRun = useMutation({
+    mutationFn: api.cancelCloudUploadRun,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["cloud-upload-runs"] })
+  });
   const createConfig = useCreateAiConfig();
   const updateConfig = useUpdateAiConfig();
   const deleteConfig = useDeleteAiConfig();
@@ -295,6 +314,9 @@ export function SystemConfigPage() {
   const [modelsResult, setModelsResult] = useState<Record<number, AiModelsResult>>({});
 
   const defaultConfig = useMemo(() => configs.find((config) => config.is_default), [configs]);
+  const latestCloudRun = cloudRuns?.items?.[0];
+  const latestCloudRunActive = latestCloudRun && ["queued", "running", "cancel_requested"].includes(latestCloudRun.status);
+  const latestCloudProgress = latestCloudRun?.total_assets ? Math.round((latestCloudRun.processed_assets / latestCloudRun.total_assets) * 100) : 0;
 
   const openCreate = () => {
     setEditingConfig(null);
@@ -406,6 +428,90 @@ export function SystemConfigPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader className="border-b">
+          <div>
+            <div className="text-xs text-muted-foreground">Cloud Storage</div>
+            <CardTitle className="flex items-center gap-2">
+              <CloudUpload className="size-5" />
+              腾讯 COS 图片同步
+            </CardTitle>
+            <CardDescription>手动把本地 assets 图片和缩略图上传到 COS，并把返回的网络地址写回 SQLite。</CardDescription>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={() => queryClient.invalidateQueries({ queryKey: ["cloud-upload-runs"] })}
+              disabled={cloudRunsLoading}
+            >
+              <RefreshCw className="size-4" />
+              刷新
+            </Button>
+            <Button
+              onClick={() => createCloudRun.mutate({ only_missing: true, include_thumbnails: true })}
+              disabled={!cloudStatus?.configured || Boolean(latestCloudRunActive) || createCloudRun.isPending}
+            >
+              {createCloudRun.isPending || latestCloudRun?.status === "running" ? <Loader2 className="size-4 animate-spin" /> : <CloudUpload className="size-4" />}
+              上传未同步图片
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4 p-4">
+          <div className="grid gap-3 md:grid-cols-4">
+            <div className="rounded-lg border bg-muted/10 p-3">
+              <div className="text-xs text-muted-foreground">配置状态</div>
+              <div className="mt-2">{cloudStatus?.configured ? <Badge>已配置</Badge> : <Badge variant="destructive">未配置</Badge>}</div>
+            </div>
+            <div className="rounded-lg border bg-muted/10 p-3">
+              <div className="text-xs text-muted-foreground">Bucket</div>
+              <div className="mt-2 truncate text-sm">{cloudStatus?.bucket || "未设置"}</div>
+            </div>
+            <div className="rounded-lg border bg-muted/10 p-3">
+              <div className="text-xs text-muted-foreground">Region</div>
+              <div className="mt-2 truncate text-sm">{cloudStatus?.region || "未设置"}</div>
+            </div>
+            <div className="rounded-lg border bg-muted/10 p-3">
+              <div className="text-xs text-muted-foreground">Key Prefix</div>
+              <div className="mt-2 truncate text-sm">{cloudStatus?.key_prefix || "visual-prompt-library"}</div>
+            </div>
+          </div>
+
+          {!cloudStatus?.configured && <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{cloudStatus?.message || "COS 配置未完成"}</div>}
+
+          {latestCloudRun && (
+            <div className="rounded-lg border bg-background/60 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="font-medium">最近上传任务 #{latestCloudRun.id}</div>
+                  <div className="mt-1 text-xs text-muted-foreground">{latestCloudRun.current_file || "等待执行"}</div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant={latestCloudRun.status === "succeeded" ? "default" : latestCloudRun.status === "failed" ? "destructive" : "secondary"}>
+                    {latestCloudRun.status}
+                  </Badge>
+                  {latestCloudRunActive && (
+                    <Button size="sm" variant="outline" onClick={() => cancelCloudRun.mutate(latestCloudRun.id)} disabled={cancelCloudRun.isPending}>
+                      取消
+                    </Button>
+                  )}
+                </div>
+              </div>
+              <div className="mt-4 h-2 overflow-hidden rounded-full bg-muted">
+                <div className="h-full bg-foreground transition-all" style={{ width: `${latestCloudProgress}%` }} />
+              </div>
+              <div className="mt-3 grid gap-2 text-xs text-muted-foreground md:grid-cols-5">
+                <div>总数 {latestCloudRun.total_assets}</div>
+                <div>已处理 {latestCloudRun.processed_assets}</div>
+                <div>已上传 {latestCloudRun.uploaded_assets}</div>
+                <div>跳过 {latestCloudRun.skipped_assets}</div>
+                <div>失败 {latestCloudRun.failed_assets}</div>
+              </div>
+              {latestCloudRun.error && <div className="mt-3 rounded-md border border-destructive/30 bg-destructive/10 p-2 text-xs text-destructive">{latestCloudRun.error}</div>}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader className="border-b">

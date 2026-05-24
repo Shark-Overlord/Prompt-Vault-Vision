@@ -130,6 +130,7 @@ def update_web_ui_repo_profile(profile_id: int, payload: WebUiRepoProfileUpdate)
         "evidence",
         "ai_reason_cn",
         "confidence",
+        "screenshot_cloud_storage_url",
         "quality_level",
         "selection_status",
         "commercial_risk",

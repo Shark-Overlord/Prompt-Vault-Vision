@@ -1289,13 +1289,8 @@ def extract_prompt_video_pairs(markdown: str, base_url: str, source_page_url: st
 
 
 def build_cn_explanation(prompt: str, category: str) -> str:
-    category_cn = {
-        "web_ui_prompt": "Web UI 视觉生成",
-        "image_generation_prompt": "图像生成",
-        "image_editing_prompt": "图像编辑",
-        "video_generation_prompt": "视频生成",
-    }.get(category, "视觉生成")
-    return f"该 Prompt 适合用于{category_cn}场景，重点参考其主体描述、风格约束、构图或输出要求。原文需结合来源 License 与效果图质量再复用。"
+    # 中文解释必须来自翻译标注，扫描阶段不生成泛化占位说明。
+    return ""
 
 
 def infer_scenario(category: str, text: str) -> str:

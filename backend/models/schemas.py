@@ -15,6 +15,7 @@ class PromptPairPatch(BaseModel):
     visual_asset_type: Optional[str] = None
     visual_asset_type_confidence: Optional[int] = Field(default=None, ge=0, le=100)
     visual_asset_type_reason: Optional[str] = None
+    cloud_storage_url: Optional[str] = None
     tags: Optional[List[str]] = None
 
 
@@ -47,6 +48,7 @@ class WebUiPromptCreate(BaseModel):
     ui_pattern: Optional[str] = None
     screenshot_original_url: Optional[str] = None
     screenshot_local_path: Optional[str] = None
+    screenshot_cloud_storage_url: Optional[str] = None
     screenshot_hash: Optional[str] = None
     tags: Optional[List[str]] = None
     quality_level: str = "pending_review"
@@ -82,6 +84,7 @@ class WebUiPromptUpdate(BaseModel):
     ui_pattern: Optional[str] = None
     screenshot_original_url: Optional[str] = None
     screenshot_local_path: Optional[str] = None
+    screenshot_cloud_storage_url: Optional[str] = None
     screenshot_hash: Optional[str] = None
     tags: Optional[List[str]] = None
     quality_level: Optional[str] = None
@@ -112,7 +115,19 @@ class WebUiRepoProfileUpdate(BaseModel):
     quality_level: Optional[str] = None
     selection_status: Optional[str] = None
     commercial_risk: Optional[str] = None
+    screenshot_cloud_storage_url: Optional[str] = None
     notes: Optional[str] = None
+
+
+class AssetPatch(BaseModel):
+    cloud_storage_url: Optional[str] = None
+    thumbnail_cloud_storage_url: Optional[str] = None
+    cloud_storage_provider: Optional[str] = None
+    cloud_storage_bucket: Optional[str] = None
+    cloud_storage_region: Optional[str] = None
+    cloud_storage_key: Optional[str] = None
+    commercial_risk: Optional[str] = None
+    description: Optional[str] = None
 
 
 class SkillRepoProfileUpdate(BaseModel):

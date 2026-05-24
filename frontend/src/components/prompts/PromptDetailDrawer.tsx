@@ -1,6 +1,7 @@
 import { Copy, ExternalLink, Star } from "lucide-react";
 import type { PromptPair, PromptPairPatch } from "../../lib/types";
 import { visualAssetTypeLabels, visualAssetTypes } from "../../lib/constants";
+import { effectiveCnExplanation } from "../../lib/annotation";
 import { assetUrl } from "../../lib/utils";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -24,7 +25,7 @@ export function PromptDetailDrawer({
 }) {
   const isFavorite = pair?.selection_status === "featured";
   const isDraftAnnotation = pair?.annotation_display_status === "draft";
-  const displayCn = pair?.prompt_cn_explanation?.trim() || pair?.latest_suggested_cn_explanation?.trim() || "";
+  const displayCn = pair ? effectiveCnExplanation(pair) : "";
   const displayTags = pair?.tags?.length ? pair.tags : pair?.latest_suggested_tags || [];
 
   return (
@@ -40,8 +41,8 @@ export function PromptDetailDrawer({
               <div className="space-y-4">
                 <Card>
                   <CardContent className="p-0">
-                    {pair.image_local_path ? (
-                      <img src={assetUrl(pair.image_local_path)} alt={pair.repo_name} className="max-h-[680px] w-full object-contain" />
+                    {pair.cloud_storage_url || pair.image_local_path ? (
+                      <img src={assetUrl(pair.cloud_storage_url || pair.image_local_path)} alt={pair.repo_name} className="max-h-[680px] w-full object-contain" />
                     ) : (
                       <div className="grid h-96 place-items-center text-muted-foreground">暂无效果图</div>
                     )}

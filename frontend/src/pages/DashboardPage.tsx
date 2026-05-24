@@ -69,7 +69,7 @@ export function DashboardPage() {
               {(data?.recent_pairs || []).map((pair) => (
                 <div key={pair.id} className="overflow-hidden rounded-xl border bg-muted/30">
                   <div className="aspect-[4/3] bg-muted">
-                    {pair.image_local_path && <img src={assetUrl(pair.image_local_path)} className="h-full w-full object-cover" />}
+                    {(pair.cloud_storage_url || pair.image_local_path) && <img src={assetUrl(pair.cloud_storage_url || pair.image_local_path)} className="h-full w-full object-cover" />}
                   </div>
                   <div className="p-3">
                     <div className="text-xs font-medium">{pair.repo_name || "未命名"}</div>

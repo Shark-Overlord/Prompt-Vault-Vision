@@ -939,6 +939,7 @@ async def save_web_ui_assets(
 
     for candidate in assets:
         screenshot_local_path = ""
+        screenshot_cloud_storage_url = ""
         screenshot_hash = ""
         if candidate.screenshot_original_url:
             if progress_callback:
@@ -948,6 +949,7 @@ async def save_web_ui_assets(
                 asset_row = conn.execute("SELECT * FROM assets WHERE image_hash = ?", (downloaded["image_hash"],)).fetchone()
                 if asset_row:
                     screenshot_local_path = asset_row["image_local_path"]
+                    screenshot_cloud_storage_url = asset_row["cloud_storage_url"] or ""
                     screenshot_hash = asset_row["image_hash"]
                 else:
                     conn.execute(
@@ -998,6 +1000,7 @@ async def save_web_ui_assets(
                 "library_kind": candidate.library_kind,
                 "screenshot_original_url": candidate.screenshot_original_url,
                 "screenshot_local_path": screenshot_local_path,
+                "screenshot_cloud_storage_url": screenshot_cloud_storage_url,
                 "screenshot_hash": screenshot_hash,
                 "evidence": candidate.evidence,
                 "framework": candidate.framework,
@@ -1021,10 +1024,10 @@ async def save_web_ui_assets(
             INSERT INTO web_ui_prompts
                 (repo_id, repo_name, repo_url, source_page_url, source_file, source_heading, line_start, line_end,
                  asset_group, asset_type, library_kind, component_type, page_type, framework, prompt_text, prompt_cn_translation, design_rules,
-                 ui_pattern, screenshot_original_url, screenshot_local_path, screenshot_hash, tags_json, quality_level,
+                 ui_pattern, screenshot_original_url, screenshot_local_path, screenshot_cloud_storage_url, screenshot_hash, tags_json, quality_level,
                  selection_status, reuse_value, evidence, confidence, content_hash, license, commercial_risk,
                  generated_by, created_at, updated_at, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 repo_id,
@@ -1047,6 +1050,7 @@ async def save_web_ui_assets(
                 candidate.ui_pattern,
                 candidate.screenshot_original_url,
                 screenshot_local_path,
+                screenshot_cloud_storage_url,
                 screenshot_hash,
                 tags_json,
                 "pending_review",

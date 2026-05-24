@@ -708,6 +708,8 @@ async def save_pair_candidates(
             asset_id = asset_row["id"]
             image_local_path = asset_row["image_local_path"]
             thumbnail_local_path = asset_row["thumbnail_local_path"]
+            cloud_storage_url = asset_row["cloud_storage_url"]
+            thumbnail_cloud_storage_url = asset_row["thumbnail_cloud_storage_url"]
         else:
             cursor = conn.execute(
                 """
@@ -735,6 +737,8 @@ async def save_pair_candidates(
             asset_id = int(cursor.lastrowid or 0)
             image_local_path = asset["image_local_path"]
             thumbnail_local_path = asset["thumbnail_local_path"]
+            cloud_storage_url = None
+            thumbnail_cloud_storage_url = None
             images_added += 1
             if progress_callback:
                 progress_callback({"downloaded_images_delta": 1, "images_added": images_added})
@@ -778,9 +782,9 @@ async def save_pair_candidates(
             """
             INSERT OR IGNORE INTO image_candidates
                 (repo_id, source_page_url, source_file, source_heading, line_start, image_original_url, image_resolved_url,
-                 image_local_path, thumbnail_local_path, image_hash, width, height, file_size, alt_text, caption, context,
-                 filename, asset_id, status, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 image_local_path, cloud_storage_url, thumbnail_local_path, thumbnail_cloud_storage_url, image_hash, width, height, file_size,
+                 alt_text, caption, context, filename, asset_id, status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 repo_id,
@@ -791,7 +795,9 @@ async def save_pair_candidates(
                 candidate.image_url,
                 candidate.image_url,
                 image_local_path,
+                cloud_storage_url,
                 thumbnail_local_path,
+                thumbnail_cloud_storage_url,
                 asset["image_hash"],
                 asset["width"],
                 asset["height"],
@@ -819,10 +825,10 @@ async def save_pair_candidates(
             """
             INSERT OR IGNORE INTO pair_candidates
                 (repo_id, repo_name, repo_url, source_page_url, source_file, source_heading, prompt_candidate_id,
-                 image_candidate_id, original_prompt, image_original_url, image_local_path, image_hash, match_type,
+                 image_candidate_id, original_prompt, image_original_url, image_local_path, cloud_storage_url, image_hash, match_type,
                  match_score, structural_score, distance_score, filename_score, semantic_score, penalty_score,
                  evidence, review_status, review_reason, selection_status, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 repo_id,
@@ -836,6 +842,7 @@ async def save_pair_candidates(
                 candidate.prompt,
                 candidate.image_url,
                 image_local_path,
+                cloud_storage_url,
                 asset["image_hash"],
                 candidate.relation_type,
                 candidate.confidence,
@@ -938,11 +945,11 @@ def accept_pair_candidate(candidate_id: int, selection_status: str = "pending_re
                 """
                 INSERT INTO prompt_effect_pairs
                     (repo_id, repo_name, repo_url, source_page_url, original_prompt, prompt_cn_explanation,
-                     image_original_url, image_local_path, image_hash, task_type, category, scenario, visual_style,
+                     image_original_url, image_local_path, cloud_storage_url, image_hash, task_type, category, scenario, visual_style,
                      quality_level, selection_status, effect_review, reusable_value, license, commercial_risk,
                      pair_relation_type, pair_evidence, pair_confidence, generated_by,
                      local_note_path, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     candidate["repo_id"],
@@ -953,6 +960,7 @@ def accept_pair_candidate(candidate_id: int, selection_status: str = "pending_re
                     build_cn_explanation(candidate["original_prompt"], category),
                     candidate["image_original_url"],
                     candidate["image_local_path"],
+                    candidate.get("cloud_storage_url"),
                     candidate["image_hash"],
                     category,
                     category,

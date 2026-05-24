@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS prompt_effect_pairs (
     prompt_cn_explanation TEXT,
     image_original_url TEXT,
     image_local_path TEXT,
+    cloud_storage_url TEXT,
     image_hash TEXT,
     task_type TEXT,
     category TEXT,
@@ -105,6 +106,7 @@ CREATE TABLE IF NOT EXISTS web_ui_prompts (
     ui_pattern TEXT,
     screenshot_original_url TEXT,
     screenshot_local_path TEXT,
+    screenshot_cloud_storage_url TEXT,
     screenshot_hash TEXT,
     tags_json TEXT,
     quality_level TEXT DEFAULT 'pending_review',
@@ -142,6 +144,7 @@ CREATE TABLE IF NOT EXISTS web_ui_repo_profiles (
     source_ai_config_id INTEGER,
     screenshot_original_url TEXT,
     screenshot_local_path TEXT,
+    screenshot_cloud_storage_url TEXT,
     screenshot_hash TEXT,
     quality_level TEXT DEFAULT 'pending_review',
     selection_status TEXT DEFAULT 'pending_review',
@@ -193,7 +196,9 @@ CREATE TABLE IF NOT EXISTS assets (
     repo_id INTEGER,
     image_original_url TEXT,
     image_local_path TEXT,
+    cloud_storage_url TEXT,
     thumbnail_local_path TEXT,
+    thumbnail_cloud_storage_url TEXT,
     image_hash TEXT UNIQUE,
     source_page_url TEXT,
     asset_type TEXT,
@@ -201,6 +206,11 @@ CREATE TABLE IF NOT EXISTS assets (
     height INTEGER,
     file_size INTEGER,
     description TEXT,
+    cloud_storage_provider TEXT,
+    cloud_storage_bucket TEXT,
+    cloud_storage_region TEXT,
+    cloud_storage_key TEXT,
+    cloud_uploaded_at TEXT,
     commercial_risk TEXT,
     created_at TEXT,
     FOREIGN KEY (repo_id) REFERENCES repos(id)
@@ -425,7 +435,9 @@ CREATE TABLE IF NOT EXISTS image_candidates (
     image_original_url TEXT,
     image_resolved_url TEXT,
     image_local_path TEXT,
+    cloud_storage_url TEXT,
     thumbnail_local_path TEXT,
+    thumbnail_cloud_storage_url TEXT,
     image_hash TEXT,
     width INTEGER,
     height INTEGER,
@@ -454,6 +466,7 @@ CREATE TABLE IF NOT EXISTS pair_candidates (
     original_prompt TEXT,
     image_original_url TEXT,
     image_local_path TEXT,
+    cloud_storage_url TEXT,
     image_hash TEXT,
     match_type TEXT,
     match_score INTEGER DEFAULT 0,
@@ -513,6 +526,26 @@ CREATE TABLE IF NOT EXISTS prompt_pair_annotation_suggestions (
     FOREIGN KEY (pair_id) REFERENCES prompt_effect_pairs(id)
 );
 
+CREATE TABLE IF NOT EXISTS cloud_upload_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    status TEXT DEFAULT 'queued',
+    total_assets INTEGER DEFAULT 0,
+    processed_assets INTEGER DEFAULT 0,
+    uploaded_assets INTEGER DEFAULT 0,
+    skipped_assets INTEGER DEFAULT 0,
+    failed_assets INTEGER DEFAULT 0,
+    current_asset_id INTEGER,
+    current_file TEXT,
+    options_json TEXT,
+    result_json TEXT,
+    error TEXT,
+    cancel_requested INTEGER DEFAULT 0,
+    created_at TEXT,
+    started_at TEXT,
+    finished_at TEXT,
+    updated_at TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_repos_category ON repos(category);
 CREATE INDEX IF NOT EXISTS idx_repos_status ON repos(status);
 CREATE INDEX IF NOT EXISTS idx_pairs_category ON prompt_effect_pairs(category);
@@ -548,6 +581,7 @@ CREATE INDEX IF NOT EXISTS idx_pair_candidates_status ON pair_candidates(review_
 CREATE INDEX IF NOT EXISTS idx_annotation_runs_status ON annotation_runs(status);
 CREATE INDEX IF NOT EXISTS idx_annotation_suggestions_pair_id ON prompt_pair_annotation_suggestions(pair_id);
 CREATE INDEX IF NOT EXISTS idx_annotation_suggestions_status ON prompt_pair_annotation_suggestions(status);
+CREATE INDEX IF NOT EXISTS idx_cloud_upload_runs_status ON cloud_upload_runs(status);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_prompt_candidates_unique
     ON prompt_candidates(repo_id, source_file, line_start, content_hash);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_image_candidates_unique
@@ -640,6 +674,7 @@ LEGACY_IMAGE_EDITING_KEYWORDS: Sequence[str] = (
 
 
 PROMPT_PAIR_EXTRA_COLUMNS: Sequence[Tuple[str, str]] = (
+    ("cloud_storage_url", "TEXT"),
     ("pair_relation_type", "TEXT DEFAULT 'unclear'"),
     ("pair_evidence", "TEXT"),
     ("pair_confidence", "INTEGER DEFAULT 0"),
@@ -648,6 +683,28 @@ PROMPT_PAIR_EXTRA_COLUMNS: Sequence[Tuple[str, str]] = (
     ("visual_asset_type_confidence", "INTEGER DEFAULT 0"),
     ("visual_asset_type_source", "TEXT"),
     ("visual_asset_type_reason", "TEXT"),
+)
+
+
+ASSET_EXTRA_COLUMNS: Sequence[Tuple[str, str]] = (
+    ("cloud_storage_url", "TEXT"),
+    ("thumbnail_cloud_storage_url", "TEXT"),
+    ("cloud_storage_provider", "TEXT"),
+    ("cloud_storage_bucket", "TEXT"),
+    ("cloud_storage_region", "TEXT"),
+    ("cloud_storage_key", "TEXT"),
+    ("cloud_uploaded_at", "TEXT"),
+)
+
+
+IMAGE_CANDIDATE_EXTRA_COLUMNS: Sequence[Tuple[str, str]] = (
+    ("cloud_storage_url", "TEXT"),
+    ("thumbnail_cloud_storage_url", "TEXT"),
+)
+
+
+PAIR_CANDIDATE_EXTRA_COLUMNS: Sequence[Tuple[str, str]] = (
+    ("cloud_storage_url", "TEXT"),
 )
 
 
@@ -673,7 +730,13 @@ WEB_UI_PROMPT_EXTRA_COLUMNS: Sequence[Tuple[str, str]] = (
     ("line_end", "INTEGER DEFAULT 0"),
     ("asset_group", "TEXT DEFAULT 'design_spec'"),
     ("library_kind", "TEXT"),
+    ("screenshot_cloud_storage_url", "TEXT"),
     ("content_hash", "TEXT"),
+)
+
+
+WEB_UI_REPO_PROFILE_EXTRA_COLUMNS: Sequence[Tuple[str, str]] = (
+    ("screenshot_cloud_storage_url", "TEXT"),
 )
 
 
@@ -854,7 +917,20 @@ def init_db() -> None:
         for name, definition in PROMPT_PAIR_EXTRA_COLUMNS:
             if name not in existing_columns:
                 conn.execute(f"ALTER TABLE prompt_effect_pairs ADD COLUMN {name} {definition}")
+        asset_columns = {row["name"] for row in conn.execute("PRAGMA table_info(assets)").fetchall()}
+        for name, definition in ASSET_EXTRA_COLUMNS:
+            if name not in asset_columns:
+                conn.execute(f"ALTER TABLE assets ADD COLUMN {name} {definition}")
+        image_candidate_columns = {row["name"] for row in conn.execute("PRAGMA table_info(image_candidates)").fetchall()}
+        for name, definition in IMAGE_CANDIDATE_EXTRA_COLUMNS:
+            if name not in image_candidate_columns:
+                conn.execute(f"ALTER TABLE image_candidates ADD COLUMN {name} {definition}")
+        pair_candidate_columns = {row["name"] for row in conn.execute("PRAGMA table_info(pair_candidates)").fetchall()}
+        for name, definition in PAIR_CANDIDATE_EXTRA_COLUMNS:
+            if name not in pair_candidate_columns:
+                conn.execute(f"ALTER TABLE pair_candidates ADD COLUMN {name} {definition}")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_pairs_visual_asset_type ON prompt_effect_pairs(visual_asset_type)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_assets_cloud_storage_url ON assets(cloud_storage_url)")
         conn.execute(
             """
             UPDATE prompt_effect_pairs
@@ -953,6 +1029,10 @@ def init_db() -> None:
         for name, definition in WEB_UI_PROMPT_EXTRA_COLUMNS:
             if name not in web_ui_columns:
                 conn.execute(f"ALTER TABLE web_ui_prompts ADD COLUMN {name} {definition}")
+        web_ui_repo_profile_columns = {row["name"] for row in conn.execute("PRAGMA table_info(web_ui_repo_profiles)").fetchall()}
+        for name, definition in WEB_UI_REPO_PROFILE_EXTRA_COLUMNS:
+            if name not in web_ui_repo_profile_columns:
+                conn.execute(f"ALTER TABLE web_ui_repo_profiles ADD COLUMN {name} {definition}")
         conn.execute(
             """
             UPDATE web_ui_prompts
@@ -971,6 +1051,17 @@ def init_db() -> None:
             UPDATE repo_scan_runs
             SET status = 'failed',
                 error = COALESCE(error, '后端服务重启，未完成扫描任务已标记失败。'),
+                finished_at = COALESCE(finished_at, ?),
+                updated_at = ?
+            WHERE status IN ('queued', 'running', 'cancel_requested')
+            """,
+            (stale_now, stale_now),
+        )
+        conn.execute(
+            """
+            UPDATE cloud_upload_runs
+            SET status = 'failed',
+                error = COALESCE(error, '后端服务重启，未完成上传任务已标记失败。'),
                 finished_at = COALESCE(finished_at, ?),
                 updated_at = ?
             WHERE status IN ('queued', 'running', 'cancel_requested')

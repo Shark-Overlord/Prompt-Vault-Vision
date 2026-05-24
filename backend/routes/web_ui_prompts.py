@@ -33,6 +33,7 @@ DB_FIELDS = [
     "ui_pattern",
     "screenshot_original_url",
     "screenshot_local_path",
+    "screenshot_cloud_storage_url",
     "screenshot_hash",
     "tags_json",
     "quality_level",
