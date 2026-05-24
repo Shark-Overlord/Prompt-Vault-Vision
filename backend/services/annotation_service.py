@@ -94,6 +94,11 @@ def _extract_json_object(text: str) -> Dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _annotation_max_tokens(original_prompt: Optional[str]) -> int:
+    prompt_length = len(original_prompt or "")
+    return max(1400, min(5000, int(prompt_length * 0.9) + 1000))
+
+
 def _row(run_id: int) -> Optional[Dict[str, Any]]:
     return fetch_one("SELECT * FROM annotation_runs WHERE id = ?", (run_id,))
 
@@ -482,6 +487,7 @@ def _pair_tags(pair_id: int) -> List[Dict[str, Any]]:
 
 
 async def generate_annotation_suggestion(pair: Dict[str, Any], run_id: Optional[int] = None, ai_config_id: Optional[int] = None) -> Dict[str, Any]:
+    original_prompt = str(pair.get("original_prompt") or "")
     system_prompt = (
         "你是视觉 Prompt 资产库的中文翻译与标签标注助手。"
         "cn_explanation 必须是 original_prompt 的忠实中文翻译，不是理解后的解释、摘要、优化版或新 Prompt。"
@@ -498,7 +504,7 @@ async def generate_annotation_suggestion(pair: Dict[str, Any], run_id: Optional[
             "category": pair.get("category"),
             "scenario": pair.get("scenario"),
             "visual_style": pair.get("visual_style"),
-            "original_prompt": pair.get("original_prompt"),
+            "original_prompt": original_prompt,
             "current_cn_explanation": pair.get("prompt_cn_explanation"),
             "current_tags": [tag.get("name") for tag in pair.get("tags") or []],
         },
@@ -519,13 +525,19 @@ async def generate_annotation_suggestion(pair: Dict[str, Any], run_id: Optional[
             ],
             ai_config_id=ai_config_id,
             temperature=0.1,
-            max_tokens=900,
+            max_tokens=_annotation_max_tokens(original_prompt),
         )
-        payload = _extract_json_object(result.get("content") or "")
+        raw_content = result.get("content") or ""
+        payload = _extract_json_object(raw_content)
+        cn_explanation = str(payload.get("cn_explanation") or payload.get("suggested_cn_explanation") or "").strip()
+        tags = _normalize_tags(payload.get("tags_cn") or payload.get("tags") or [])
+        if not cn_explanation or not tags:
+            preview = re.sub(r"\s+", " ", raw_content).strip()[:500]
+            raise ValueError(f"AI 返回缺少 cn_explanation 或 tags_cn，未生成有效标注草稿。返回片段：{preview}")
         suggestion = {
             "prompt_language": str(payload.get("prompt_language") or "unknown")[:40],
-            "suggested_cn_explanation": str(payload.get("cn_explanation") or payload.get("suggested_cn_explanation") or "").strip(),
-            "suggested_tags_json": _json_dumps(_normalize_tags(payload.get("tags_cn") or payload.get("tags") or [])),
+            "suggested_cn_explanation": cn_explanation,
+            "suggested_tags_json": _json_dumps(tags),
             "image_type_cn": str(payload.get("image_type_cn") or "").strip(),
             "reason_cn": str(payload.get("reason_cn") or "").strip(),
             "confidence": max(0, min(int(payload.get("confidence") or 70), 100)),
